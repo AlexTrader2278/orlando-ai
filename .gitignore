@@ -1,0 +1,13 @@
+node_modules/
+.next/
+.env
+.env.local
+.env*.local
+
+data/*.json
+data/*.jsonl
+data/*.gz
+
+.vercel
+.DS_Store
+*.log
