@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { NormalizedMessage, Thread } from "../lib/types.js";
+import type { NormalizedMessage, Thread } from "../lib/types";
 
 const INPUT = resolve("data/messages.jsonl");
 const OUTPUT = resolve("data/threads.jsonl");

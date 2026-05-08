@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { NormalizedMessage } from "../lib/types.js";
+import type { NormalizedMessage } from "../lib/types";
 
 const INPUT = resolve("data/messages.jsonl");
 

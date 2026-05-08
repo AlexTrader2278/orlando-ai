@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { embed, EMBED_DIMS } from "../lib/mistral.js";
-import { upsertThreads } from "../lib/supabase-rest.js";
-import type { Thread } from "../lib/types.js";
+import { embed, EMBED_DIMS } from "../lib/mistral";
+import { upsertThreads } from "../lib/supabase-rest";
+import type { Thread } from "../lib/types";
 
 const INPUT = resolve("data/threads.jsonl");
 

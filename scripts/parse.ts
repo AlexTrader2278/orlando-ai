@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { NormalizedMessage, RawMessage } from "../lib/types.js";
+import type { NormalizedMessage, RawMessage } from "../lib/types";
 
 const INPUT = process.env.INPUT ??
   "C:\\Users\\user\\Downloads\\Telegram Desktop\\ChatExport_2026-05-07 (2)\\result.json";

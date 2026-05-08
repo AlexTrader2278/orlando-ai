@@ -1,5 +1,5 @@
-import { embed } from "../lib/mistral.js";
-import { rpcSearchThreads } from "../lib/supabase-rest.js";
+import { embed } from "../lib/mistral";
+import { rpcSearchThreads } from "../lib/supabase-rest";
 
 async function main() {
   const query = process.argv.slice(2).join(" ").trim();
