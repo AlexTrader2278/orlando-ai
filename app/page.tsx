@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type Source = {
   id: string;
@@ -15,23 +15,25 @@ type Source = {
 type AskResponse = {
   answer: string;
   sources: Source[];
-  tokensUsed?: { embed: number; chat: number };
   error?: string;
 };
 
-const EXAMPLES = [
-  "Расход 1.8 на трассе",
-  "Когда менять цепь ГРМ",
-  "Стук в подвеске на холодную",
-  "АКПП 6T40 проблемы",
-  "Какое масло лить",
-  "Где взять оригинальные колодки",
-];
+type CarSummary = {
+  totalRecords: number;
+  currentMileage: number | null;
+  lastDate: string | null;
+  lastWorks: string[];
+};
 
-const STATS = [
-  { label: "тредов", value: "8 728" },
-  { label: "владельцев", value: "783" },
-  { label: "мес. обсуждений", value: "21" },
+type CarResponse = { summary: CarSummary; error?: string };
+
+const EXAMPLES = [
+  "Когда пора менять масло?",
+  "Цепь ГРМ — пора?",
+  "Стук в подвеске на холодную",
+  "Что владельцы пишут про АКПП 6T40",
+  "Какое масло лить в 1.8",
+  "Где взять оригинальные колодки",
 ];
 
 export default function Home() {
@@ -39,6 +41,21 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<AskResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [car, setCar] = useState<CarSummary | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
+  const [logText, setLogText] = useState("");
+  const [logSaving, setLogSaving] = useState(false);
+  const [logMessage, setLogMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/car")
+      .then((r) => r.json())
+      .then((j: CarResponse) => {
+        if (j.summary) setCar(j.summary);
+      })
+      .catch(() => {});
+  }, []);
 
   async function ask(q: string) {
     setLoading(true);
@@ -51,11 +68,8 @@ export default function Home() {
         body: JSON.stringify({ question: q }),
       });
       const json = (await res.json()) as AskResponse;
-      if (!res.ok) {
-        setError(json.error ?? `HTTP ${res.status}`);
-      } else {
-        setData(json);
-      }
+      if (!res.ok) setError(json.error ?? `HTTP ${res.status}`);
+      else setData(json);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -63,15 +77,55 @@ export default function Home() {
     }
   }
 
-  function onSubmit(e: React.FormEvent) {
+  function onAskSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (question.trim().length < 5) return;
     ask(question.trim());
   }
 
+  async function saveLog() {
+    if (logText.trim().length < 5) return;
+    setLogSaving(true);
+    setLogMessage(null);
+    try {
+      const adminKey =
+        typeof window !== "undefined" ? localStorage.getItem("orlando-ai:admin") ?? "" : "";
+      const res = await fetch("/api/log", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(adminKey ? { "X-Admin-Key": adminKey } : {}),
+        },
+        body: JSON.stringify({ text: logText.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        if (res.status === 401) {
+          const k = prompt("Введи admin key (один раз, сохранится в браузере):");
+          if (k) {
+            localStorage.setItem("orlando-ai:admin", k);
+            setLogMessage("Ключ сохранён. Нажми «Сохранить» ещё раз.");
+          }
+        } else {
+          setLogMessage(`Ошибка: ${json.error ?? res.status}`);
+        }
+        return;
+      }
+      setLogMessage("✓ Записано. AI теперь это учитывает.");
+      setLogText("");
+      // обновим карточку «Моя машина»
+      const fresh = await fetch("/api/car").then((r) => r.json());
+      if (fresh.summary) setCar(fresh.summary);
+    } catch (e) {
+      setLogMessage(`Ошибка: ${(e as Error).message}`);
+    } finally {
+      setLogSaving(false);
+    }
+  }
+
   return (
     <main className="mx-auto max-w-5xl px-3 py-5 md:px-4 md:py-10">
-      {/* Header pill */}
+      {/* Header */}
       <div className="rounded-3xl bg-[linear-gradient(135deg,#1e2a4f_0%,#0f1a35_100%)] px-5 py-4 md:px-7 md:py-5 shadow-neu">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 md:gap-4 min-w-0">
@@ -83,18 +137,18 @@ export default function Home() {
                 Orlando<span className="text-blue-300">-AI</span>
               </h1>
               <p className="text-[11px] md:text-sm text-blue-200/80 leading-tight truncate">
-                Спроси сообщество Chevrolet Orlando
+                Спроси сообщество + AI помнит твою машину
               </p>
             </div>
           </div>
           <span className="hidden sm:inline-flex shrink-0 items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-xs text-blue-100">
             <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-            RAG + AI
+            RAG + AI + History
           </span>
         </div>
       </div>
 
-      {/* Hero: form + side-card */}
+      {/* Hero: form + my-car */}
       <div className="mt-5 md:mt-6 grid grid-cols-1 gap-5 md:grid-cols-5 md:gap-6">
         {/* Form (3 cols) */}
         <div className="md:col-span-3 rounded-3xl bg-soft p-5 md:p-7 shadow-neu">
@@ -105,12 +159,12 @@ export default function Home() {
             </h2>
           </div>
 
-          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+          <form onSubmit={onAskSubmit} className="flex flex-col gap-4">
             <div className="rounded-2xl shadow-neuInset bg-bg">
               <textarea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
-                placeholder="Например: расход 1.8 на трассе, когда менять цепь, стук на холодную…"
+                placeholder="Например: пора ли менять масло? цепь ГРМ? стук на холодную…"
                 rows={3}
                 className="w-full resize-none rounded-2xl bg-transparent px-4 py-3 text-base outline-none placeholder:text-muted/70"
               />
@@ -124,12 +178,12 @@ export default function Home() {
               {loading ? (
                 <>
                   <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
-                  <span>Ищу в чате…</span>
+                  <span>Ищу в чате + смотрю историю…</span>
                 </>
               ) : (
                 <>
                   <span>⚡</span>
-                  <span>Спросить сообщество</span>
+                  <span>Спросить</span>
                 </>
               )}
             </button>
@@ -158,40 +212,91 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Side card (2 cols) */}
+        {/* My car (2 cols) */}
         <div className="md:col-span-2 rounded-3xl bg-soft p-5 md:p-6 shadow-neu flex flex-col">
-          <div className="mx-auto mt-2 mb-4 grid h-20 w-20 md:h-24 md:w-24 place-items-center rounded-3xl bg-bg shadow-neuInset text-5xl md:text-6xl">
-            🚗
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-accent">🛠️</span>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+              Моя машина
+            </h2>
           </div>
 
-          <h3 className="text-center text-base md:text-lg font-semibold leading-snug">
-            Опыт реальных<br className="hidden md:inline" /> владельцев Orlando
-          </h3>
-          <p className="mt-2 text-center text-xs md:text-sm text-muted leading-relaxed">
-            AI ищет в архиве ТГ-чата сообщества и отвечает с цитатами реальных людей — с датами и реакциями.
-          </p>
+          {!car && (
+            <p className="mt-2 text-xs text-muted">Загружаю историю…</p>
+          )}
 
-          <div className="mt-5 grid grid-cols-3 gap-2">
-            {STATS.map((s) => (
-              <div
-                key={s.label}
-                className="rounded-2xl bg-bg p-3 text-center shadow-neuInsetSm"
-              >
-                <div className="text-base md:text-lg font-bold text-ink leading-tight">
-                  {s.value}
+          {car && car.totalRecords === 0 && (
+            <p className="mt-2 text-xs text-muted">
+              История пуста. Запиши первую работу — AI будет это учитывать в ответах.
+            </p>
+          )}
+
+          {car && car.totalRecords > 0 && (
+            <>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div className="rounded-2xl bg-bg p-3 text-center shadow-neuInsetSm">
+                  <div className="text-base md:text-lg font-bold text-ink leading-tight">
+                    {car.currentMileage ? car.currentMileage.toLocaleString("ru-RU") : "—"}
+                  </div>
+                  <div className="mt-0.5 text-[10px] md:text-xs text-muted leading-tight">
+                    км пробег
+                  </div>
                 </div>
-                <div className="mt-0.5 text-[10px] md:text-xs text-muted leading-tight">
-                  {s.label}
+                <div className="rounded-2xl bg-bg p-3 text-center shadow-neuInsetSm">
+                  <div className="text-base md:text-lg font-bold text-ink leading-tight">
+                    {car.totalRecords}
+                  </div>
+                  <div className="mt-0.5 text-[10px] md:text-xs text-muted leading-tight">
+                    записей
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
 
-          <div className="mt-4 flex flex-col gap-2">
-            <FeaturePill icon="🛡️" text="Реальный опыт, не выдумки AI" />
-            <FeaturePill icon="⚡" text="Ответ за 5–10 секунд" />
-            <FeaturePill icon="📌" text="Цитаты с источниками" />
-          </div>
+              <div className="mt-3 rounded-2xl bg-bg p-3 shadow-neuInsetSm">
+                <div className="text-[10px] uppercase tracking-wide text-muted">
+                  Последняя работа · {car.lastDate}
+                </div>
+                <ul className="mt-1.5 space-y-0.5 text-xs text-ink/85">
+                  {car.lastWorks.map((w, i) => (
+                    <li key={i} className="leading-snug">• {w}</li>
+                  ))}
+                </ul>
+              </div>
+            </>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setLogOpen((x) => !x)}
+            className="mt-4 rounded-2xl bg-bg px-3 py-2.5 text-xs md:text-sm font-medium text-ink shadow-neuSm transition active:shadow-neuInsetSm"
+          >
+            {logOpen ? "× Закрыть" : "✍️ Записать работу"}
+          </button>
+
+          {logOpen && (
+            <div className="mt-3 flex flex-col gap-2">
+              <div className="rounded-2xl shadow-neuInset bg-bg">
+                <textarea
+                  value={logText}
+                  onChange={(e) => setLogText(e.target.value)}
+                  rows={3}
+                  placeholder="напр.: сегодня поменял масло мобил 5w30 4л + фильтр махле, пробег 198500, отдал 3200"
+                  className="w-full resize-none rounded-2xl bg-transparent px-3 py-2.5 text-xs md:text-sm outline-none placeholder:text-muted/70"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={saveLog}
+                disabled={logSaving || logText.trim().length < 5}
+                className="rounded-2xl bg-accent px-3 py-2.5 text-xs md:text-sm font-semibold text-white shadow-neuSm transition active:shadow-neuInsetSm disabled:opacity-50"
+              >
+                {logSaving ? "Сохраняю…" : "Сохранить"}
+              </button>
+              {logMessage && (
+                <p className="text-[11px] text-muted leading-snug">{logMessage}</p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -204,7 +309,7 @@ export default function Home() {
               <div className="h-2 w-2 animate-pulse rounded-full bg-accent" style={{ animationDelay: "0.2s" }} />
               <div className="h-2 w-2 animate-pulse rounded-full bg-accent" style={{ animationDelay: "0.4s" }} />
             </div>
-            <span className="text-sm">Ищу в базе сообщества и собираю ответ…</span>
+            <span className="text-sm">Собираю ответ…</span>
           </div>
         </div>
       )}
@@ -268,21 +373,9 @@ export default function Home() {
         </div>
       )}
 
-      {/* Footer */}
       <p className="mt-8 mb-4 text-center text-[11px] md:text-xs text-muted">
-        Orlando-AI · экспериментальный · данные из чата сообщества + AI-эксперт
+        Orlando-AI · твой персональный помощник по Орландо
       </p>
     </main>
-  );
-}
-
-function FeaturePill({ icon, text }: { icon: string; text: string }) {
-  return (
-    <div className="flex items-center gap-3 rounded-2xl bg-bg px-3 py-2.5 shadow-neuSm">
-      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-xl bg-soft shadow-neuInsetSm text-sm">
-        {icon}
-      </span>
-      <span className="text-xs md:text-sm text-ink/80 leading-snug">{text}</span>
-    </div>
   );
 }

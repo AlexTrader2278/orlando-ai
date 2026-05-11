@@ -1,23 +1,24 @@
 import { embed } from "./mistral";
 import { rpcSearchThreads, type SearchResult } from "./supabase-rest";
 import { chat } from "./openrouter";
+import { getServiceRecords, formatHistoryForPrompt } from "./car";
 
 const TOP_K_FOR_LLM = 8;
 
-const SYSTEM_PROMPT = `Ты — AI-ассистент для владельцев Chevrolet Orlando. Отвечаешь на русском.
+const SYSTEM_PROMPT = `Ты — AI-ассистент владельца Chevrolet Orlando. Отвечаешь на русском.
 
-У тебя есть два источника:
-1. Твои общие знания об автомобиле Chevrolet Orlando (двигатели 1.8 LUW, 2.0 дизель, АКПП 6T40, цепь ГРМ, типичные болезни).
-2. Цитаты из чата сообщества владельцев Орландо — реальный опыт людей с пробегами, артикулами, ценами и регионами.
+У тебя ТРИ источника:
+1) Твои общие знания о Chevrolet Orlando (двигатели 1.8 LUW, 2.0 дизель, АКПП 6T40, цепь ГРМ, типичные болезни).
+2) Цитаты из чата сообщества владельцев — реальный опыт с пробегами, артикулами, ценами.
+3) ИСТОРИЯ КОНКРЕТНО ЭТОЙ МАШИНЫ — что и когда уже делали, на каком пробеге.
 
 ПРАВИЛА:
-- Сначала дай экспертный ответ кратко и по делу (2–4 абзаца).
-- Затем добавь блок "💬 Что пишут владельцы:" — выдержки из 3–5 цитат с источниками.
-- В цитатах ИСПОЛЬЗУЙ ТОЛЬКО предоставленные тебе треды. Не выдумывай.
-- Каждую цитату оформляй так: «короткая выдержка...» — [Имя автора, дата, реакции]
-- Не повторяй цитату дословно — выбирай самое полезное (артикулы, цифры, конкретные действия).
-- Если в тредах нет ответа на вопрос — честно скажи.
-- Не упоминай "тред #5" или "источник 3" — пиши просто как обычный текст.`;
+- Если в вопросе есть привязка к "у меня / моей машине / пора ли / делал ли я" — ОПИРАЙСЯ на историю машины. Считай по факту: «масло меняли N км назад, ехать ещё ~X км».
+- Сначала экспертный ответ кратко и по делу (2–4 абзаца). Если уместно — упомяни персональную историю.
+- Затем блок «💬 Что пишут владельцы:» — 3–5 цитат из чата сообщества с источниками: «выдержка» — [Имя, дата, реакции].
+- В цитатах используй ТОЛЬКО предоставленные треды. Не выдумывай.
+- Если в тредах ответа нет — честно скажи.
+- Не пиши «тред #5» или «источник 3» — пиши обычным текстом.`;
 
 function buildContext(threads: SearchResult[]): string {
   return threads
@@ -40,21 +41,33 @@ export async function askOrlando(question: string): Promise<AskAnswer> {
   const apiKey = process.env.MISTRAL_API_KEY;
   if (!apiKey) throw new Error("MISTRAL_API_KEY is not set");
 
+  // 1) embed запроса + поиск по чату сообщества
   const { embeddings, tokensUsed: embedTokens } = await embed([question], apiKey);
   const queryEmbedding = `[${embeddings[0].join(",")}]`;
-
   const sources = await rpcSearchThreads(queryEmbedding, question, 15);
 
-  if (sources.length === 0) {
+  // 2) персональная история машины — короткий список последних работ
+  let historyBlock = "";
+  try {
+    const records = await getServiceRecords(30);
+    historyBlock = formatHistoryForPrompt(records);
+  } catch {
+    // если таблицы пока нет (миграция не применена) — не падаем, просто без истории
+    historyBlock = "";
+  }
+
+  if (sources.length === 0 && !historyBlock) {
     return {
-      answer: "В базе сообщества по этому вопросу обсуждений не нашлось. Попробуй переформулировать.",
+      answer:
+        "В базе сообщества по этому вопросу обсуждений не нашлось, и истории машины ещё нет. Попробуй переформулировать или добавить пару записей о работах.",
       sources: [],
       tokensUsed: { embed: embedTokens, chat: 0 },
     };
   }
 
-  const context = buildContext(sources);
-  const userPrompt = `ВОПРОС ВЛАДЕЛЬЦА:\n${question}\n\nЦИТАТЫ ИЗ ЧАТА СООБЩЕСТВА:\n\n${context}`;
+  const context = sources.length > 0 ? buildContext(sources) : "(в чате сообщества подходящих обсуждений не нашлось)";
+  const historyText = historyBlock ? `\n\n${historyBlock}` : "";
+  const userPrompt = `ВОПРОС:\n${question}${historyText}\n\nЦИТАТЫ ИЗ ЧАТА СООБЩЕСТВА:\n\n${context}`;
 
   const { content, tokensUsed: chatTokens } = await chat(
     [
