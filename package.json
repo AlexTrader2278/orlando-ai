@@ -12,7 +12,8 @@
     "smoke": "tsx --env-file=.env.local scripts/smoke.ts",
     "index": "tsx --env-file=.env.local scripts/index.ts",
     "search": "tsx --env-file=.env.local scripts/search.ts",
-    "seed-car": "tsx --env-file=.env.local scripts/seed-car.ts"
+    "seed-car": "tsx --env-file=.env.local scripts/seed-car.ts",
+    "seed-summary": "tsx --env-file=.env.local scripts/seed-summary.ts"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
