@@ -47,6 +47,13 @@ export default function Home() {
   const [logText, setLogText] = useState("");
   const [logSaving, setLogSaving] = useState(false);
   const [logMessage, setLogMessage] = useState<string | null>(null);
+  const [pinSet, setPinSet] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setPinSet(Boolean(localStorage.getItem("orlando-ai:admin")));
+    }
+  }, []);
 
   useEffect(() => {
     fetch("/api/car")
@@ -83,29 +90,49 @@ export default function Home() {
     ask(question.trim());
   }
 
+  function askForPin(): string | null {
+    const k = prompt("Введи PIN-код для записи (запомнится в этом браузере):");
+    if (!k) return null;
+    localStorage.setItem("orlando-ai:admin", k);
+    setPinSet(true);
+    return k;
+  }
+
+  function forgetPin() {
+    localStorage.removeItem("orlando-ai:admin");
+    setPinSet(false);
+    setLogMessage("PIN удалён из браузера. Запись закрыта.");
+  }
+
   async function saveLog() {
     if (logText.trim().length < 5) return;
     setLogSaving(true);
     setLogMessage(null);
     try {
-      const adminKey =
+      let adminKey =
         typeof window !== "undefined" ? localStorage.getItem("orlando-ai:admin") ?? "" : "";
+      if (!adminKey) {
+        const fresh = askForPin();
+        if (!fresh) {
+          setLogSaving(false);
+          return;
+        }
+        adminKey = fresh;
+      }
       const res = await fetch("/api/log", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(adminKey ? { "X-Admin-Key": adminKey } : {}),
+          "X-Admin-Key": adminKey,
         },
         body: JSON.stringify({ text: logText.trim() }),
       });
       const json = await res.json();
       if (!res.ok) {
         if (res.status === 401) {
-          const k = prompt("Введи admin key (один раз, сохранится в браузере):");
-          if (k) {
-            localStorage.setItem("orlando-ai:admin", k);
-            setLogMessage("Ключ сохранён. Нажми «Сохранить» ещё раз.");
-          }
+          localStorage.removeItem("orlando-ai:admin");
+          setPinSet(false);
+          setLogMessage("Неверный PIN. Попробуй снова — нажми «Сохранить».");
         } else {
           setLogMessage(`Ошибка: ${json.error ?? res.status}`);
         }
@@ -113,7 +140,6 @@ export default function Home() {
       }
       setLogMessage("✓ Записано. AI теперь это учитывает.");
       setLogText("");
-      // обновим карточку «Моя машина»
       const fresh = await fetch("/api/car").then((r) => r.json());
       if (fresh.summary) setCar(fresh.summary);
     } catch (e) {
@@ -268,9 +294,20 @@ export default function Home() {
           <button
             type="button"
             onClick={() => setLogOpen((x) => !x)}
-            className="mt-4 rounded-2xl bg-bg px-3 py-2.5 text-xs md:text-sm font-medium text-ink shadow-neuSm transition active:shadow-neuInsetSm"
+            className="mt-4 rounded-2xl bg-bg px-3 py-2.5 text-xs md:text-sm font-medium text-ink shadow-neuSm transition active:shadow-neuInsetSm flex items-center justify-center gap-1.5"
           >
-            {logOpen ? "× Закрыть" : "✍️ Записать работу"}
+            {logOpen ? (
+              <>
+                <span>×</span>
+                <span>Закрыть</span>
+              </>
+            ) : (
+              <>
+                <span>✍️</span>
+                <span>Записать работу</span>
+                <span className="text-[10px] text-muted">{pinSet ? "🔓" : "🔒"}</span>
+              </>
+            )}
           </button>
 
           {logOpen && (
@@ -294,6 +331,15 @@ export default function Home() {
               </button>
               {logMessage && (
                 <p className="text-[11px] text-muted leading-snug">{logMessage}</p>
+              )}
+              {pinSet && (
+                <button
+                  type="button"
+                  onClick={forgetPin}
+                  className="self-start text-[10px] text-muted underline-offset-2 hover:underline"
+                >
+                  забыть PIN на этом устройстве
+                </button>
               )}
             </div>
           )}
