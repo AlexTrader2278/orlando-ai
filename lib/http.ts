@@ -29,6 +29,7 @@ function fetchPost(
     headers: { "Content-Type": "application/json; charset=utf-8", ...headers },
     body: JSON.stringify(body),
     signal: controller.signal,
+    cache: "no-store",
   })
     .then(async (res) => ({
       status: res.status,
@@ -99,7 +100,7 @@ function fetchGet(
 ): Promise<HttpResponse> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, { method: "GET", headers, signal: controller.signal })
+  return fetch(url, { method: "GET", headers, signal: controller.signal, cache: "no-store" })
     .then(async (res) => ({ status: res.status, body: await res.text() }))
     .finally(() => clearTimeout(timer));
 }
