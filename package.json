@@ -13,7 +13,8 @@
     "index": "tsx --env-file=.env.local scripts/index.ts",
     "search": "tsx --env-file=.env.local scripts/search.ts",
     "seed-car": "tsx --env-file=.env.local scripts/seed-car.ts",
-    "seed-summary": "tsx --env-file=.env.local scripts/seed-summary.ts"
+    "seed-summary": "tsx --env-file=.env.local scripts/seed-summary.ts",
+    "seed-itog": "tsx --env-file=.env.local scripts/seed-itog.ts"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
