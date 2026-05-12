@@ -1,4 +1,5 @@
 import { httpGet, httpPost } from "./http";
+import type { ServicePart } from "./types";
 
 export type ServiceRecord = {
   id: string;
@@ -6,6 +7,7 @@ export type ServiceRecord = {
   mileage_km: number | null;
   works: string[];
   materials: string[];
+  parts: ServicePart[];
   cost_works: number | null;
   cost_materials: number | null;
   cost_total: number | null;
@@ -57,24 +59,64 @@ function fmtDate(d: string): string {
   return `${day}.${m}.${y}`;
 }
 
+function fmtPart(p: ServicePart): string {
+  const parts = [
+    p.brand,
+    p.name,
+    p.article ? `арт.${p.article}` : null,
+    p.qty != null ? `${p.qty}${p.unit ? p.unit : "шт"}` : null,
+    p.price != null ? `${p.price.toLocaleString("ru-RU")} ₽` : null,
+  ].filter(Boolean);
+  return parts.join(" ");
+}
+
+function monthsBetween(fromIso: string, toIso: string): number {
+  const f = new Date(fromIso);
+  const t = new Date(toIso);
+  const months = (t.getFullYear() - f.getFullYear()) * 12 + (t.getMonth() - f.getMonth());
+  return Math.max(0, months);
+}
+
 /** Сборка краткой истории для подмешивания в системный промпт ИИ. */
 export function formatHistoryForPrompt(records: ServiceRecord[]): string {
   if (records.length === 0) return "";
 
+  const today = new Date().toISOString().slice(0, 10);
   const latest = records[0];
-  const head = latest.mileage_km
-    ? `Текущий пробег (по последней записи): ${latest.mileage_km.toLocaleString("ru-RU")} км (${fmtDate(latest.date)})`
-    : `Последняя запись: ${fmtDate(latest.date)}`;
+  const currentMileage = latest.mileage_km;
+  const headLines = [
+    currentMileage
+      ? `Текущий пробег (по последней записи): ${currentMileage.toLocaleString("ru-RU")} км`
+      : null,
+    `Последняя запись: ${fmtDate(latest.date)} (сегодня ${fmtDate(today)})`,
+  ].filter(Boolean);
 
   const lines = records.slice(0, 30).map((r) => {
     const m = r.mileage_km ? `${r.mileage_km.toLocaleString("ru-RU")} км` : "-";
     const works = r.works.join("; ");
-    const mats = r.materials.length > 0 ? ` [мат-лы: ${r.materials.join(", ")}]` : "";
-    const cost = r.cost_total ? ` [${r.cost_total.toLocaleString("ru-RU")} ₽]` : "";
-    return `- ${fmtDate(r.date)}, ${m}: ${works}${mats}${cost}`;
+
+    // Готовая математика — чтобы AI не считал сам и не ошибался
+    const sinceMonths = monthsBetween(r.date, today);
+    const sinceKm = currentMileage && r.mileage_km ? currentMileage - r.mileage_km : null;
+    const sinceBits: string[] = [];
+    if (sinceMonths > 0) sinceBits.push(`${sinceMonths} мес. назад`);
+    if (sinceKm != null && sinceKm > 0)
+      sinceBits.push(`пробег с тех пор +${sinceKm.toLocaleString("ru-RU")} км`);
+    const since = sinceBits.length > 0 ? `  [${sinceBits.join(", ")}]` : "";
+
+    // Структурированные запчасти приоритетнее, fallback на materials
+    let partsLine = "";
+    if (r.parts && r.parts.length > 0) {
+      partsLine = ` [запчасти: ${r.parts.map(fmtPart).join("; ")}]`;
+    } else if (r.materials && r.materials.length > 0) {
+      partsLine = ` [мат-лы: ${r.materials.join(", ")}]`;
+    }
+
+    const cost = r.cost_total ? ` [итого ${r.cost_total.toLocaleString("ru-RU")} ₽]` : "";
+    return `- ${fmtDate(r.date)}, ${m}: ${works}${partsLine}${cost}${since}`;
   });
 
-  return `ИСТОРИЯ МАШИНЫ ВЛАДЕЛЬЦА (Chevrolet Orlando):\n${head}\n\nРаботы (от свежих к старым):\n${lines.join("\n")}`;
+  return `ИСТОРИЯ МАШИНЫ ВЛАДЕЛЬЦА (Chevrolet Orlando):\n${headLines.join("\n")}\n\nРаботы (от свежих к старым, с готовыми интервалами):\n${lines.join("\n")}`;
 }
 
 /** Краткая сводка для UI: пробег + последняя работа. */

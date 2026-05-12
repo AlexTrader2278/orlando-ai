@@ -39,6 +39,16 @@ export type NormalizedMessage = {
   hasMedia: boolean;
 };
 
+export type ServicePart = {
+  name: string;                // "масляный фильтр", "масло 5W-30"
+  brand?: string | null;       // "Mann", "Mobil 1"
+  article?: string | null;     // "W914", "GM 25193400"
+  qty?: number | null;         // 1, 4
+  unit?: string | null;        // "шт", "л", "кг"
+  price?: number | null;       // ₽
+  notes?: string | null;
+};
+
 export type Thread = {
   id: string;
   rootId: number;

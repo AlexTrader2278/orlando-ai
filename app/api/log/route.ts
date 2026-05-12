@@ -35,6 +35,7 @@ export async function POST(req: Request) {
       mileage_km: parsed.mileage_km,
       works: parsed.works,
       materials: parsed.materials,
+      parts: parsed.parts,
       cost_works: parsed.cost_works,
       cost_materials: parsed.cost_materials,
       cost_total: parsed.cost_total,
