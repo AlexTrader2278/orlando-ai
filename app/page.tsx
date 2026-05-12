@@ -18,6 +18,29 @@ type AskResponse = {
   error?: string;
 };
 
+type ServicePart = {
+  name: string;
+  brand?: string | null;
+  article?: string | null;
+  qty?: number | null;
+  unit?: string | null;
+  price?: number | null;
+};
+
+type ServiceRecord = {
+  id: string;
+  date: string;
+  mileage_km: number | null;
+  works: string[];
+  materials: string[];
+  parts: ServicePart[];
+  cost_works: number | null;
+  cost_materials: number | null;
+  cost_total: number | null;
+  notes: string | null;
+  source: string | null;
+};
+
 type CarSummary = {
   totalRecords: number;
   currentMileage: number | null;
@@ -25,7 +48,7 @@ type CarSummary = {
   lastWorks: string[];
 };
 
-type CarResponse = { summary: CarSummary; error?: string };
+type CarResponse = { summary: CarSummary; records: ServiceRecord[]; error?: string };
 
 const EXAMPLES = [
   "Когда пора менять масло?",
@@ -36,6 +59,17 @@ const EXAMPLES = [
   "Где взять оригинальные колодки",
 ];
 
+function getAdminKey(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem("orlando-ai:admin") ?? "";
+}
+function setAdminKey(k: string) {
+  localStorage.setItem("orlando-ai:admin", k);
+}
+function clearAdminKey() {
+  localStorage.removeItem("orlando-ai:admin");
+}
+
 export default function Home() {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
@@ -43,25 +77,27 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   const [car, setCar] = useState<CarSummary | null>(null);
+  const [records, setRecords] = useState<ServiceRecord[]>([]);
+  const [pinSet, setPinSet] = useState(false);
+  const [recordsOpen, setRecordsOpen] = useState(false);
+  const [editing, setEditing] = useState<ServiceRecord | null>(null);
+
   const [logOpen, setLogOpen] = useState(false);
   const [logText, setLogText] = useState("");
   const [logSaving, setLogSaving] = useState(false);
   const [logMessage, setLogMessage] = useState<string | null>(null);
-  const [pinSet, setPinSet] = useState(false);
+
+  async function refreshCar() {
+    try {
+      const r = await fetch("/api/car").then((x) => x.json());
+      if (r.summary) setCar(r.summary);
+      if (Array.isArray(r.records)) setRecords(r.records);
+    } catch {}
+  }
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      setPinSet(Boolean(localStorage.getItem("orlando-ai:admin")));
-    }
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/car")
-      .then((r) => r.json())
-      .then((j: CarResponse) => {
-        if (j.summary) setCar(j.summary);
-      })
-      .catch(() => {});
+    setPinSet(Boolean(getAdminKey()));
+    refreshCar();
   }, []);
 
   async function ask(q: string) {
@@ -91,17 +127,16 @@ export default function Home() {
   }
 
   function askForPin(): string | null {
-    const k = prompt("Введи PIN-код для записи (запомнится в этом браузере):");
+    const k = prompt("Введи PIN-код (запомнится в этом браузере):");
     if (!k) return null;
-    localStorage.setItem("orlando-ai:admin", k);
+    setAdminKey(k);
     setPinSet(true);
     return k;
   }
-
   function forgetPin() {
-    localStorage.removeItem("orlando-ai:admin");
+    clearAdminKey();
     setPinSet(false);
-    setLogMessage("PIN удалён из браузера. Запись закрыта.");
+    setLogMessage("PIN удалён из браузера.");
   }
 
   async function saveLog() {
@@ -109,8 +144,7 @@ export default function Home() {
     setLogSaving(true);
     setLogMessage(null);
     try {
-      let adminKey =
-        typeof window !== "undefined" ? localStorage.getItem("orlando-ai:admin") ?? "" : "";
+      let adminKey = getAdminKey();
       if (!adminKey) {
         const fresh = askForPin();
         if (!fresh) {
@@ -121,18 +155,15 @@ export default function Home() {
       }
       const res = await fetch("/api/log", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Admin-Key": adminKey,
-        },
+        headers: { "Content-Type": "application/json", "X-Admin-Key": adminKey },
         body: JSON.stringify({ text: logText.trim() }),
       });
       const json = await res.json();
       if (!res.ok) {
         if (res.status === 401) {
-          localStorage.removeItem("orlando-ai:admin");
+          clearAdminKey();
           setPinSet(false);
-          setLogMessage("Неверный PIN. Попробуй снова — нажми «Сохранить».");
+          setLogMessage("Неверный PIN. Нажми «Сохранить» снова.");
         } else {
           setLogMessage(`Ошибка: ${json.error ?? res.status}`);
         }
@@ -140,13 +171,40 @@ export default function Home() {
       }
       setLogMessage("✓ Записано. AI теперь это учитывает.");
       setLogText("");
-      const fresh = await fetch("/api/car").then((r) => r.json());
-      if (fresh.summary) setCar(fresh.summary);
+      await refreshCar();
     } catch (e) {
       setLogMessage(`Ошибка: ${(e as Error).message}`);
     } finally {
       setLogSaving(false);
     }
+  }
+
+  async function deleteRecord(rec: ServiceRecord) {
+    const works = rec.works.slice(0, 2).join("; ") || "(пусто)";
+    if (!confirm(`Удалить запись?\n\n${rec.date} | ${rec.mileage_km ?? "—"} км\n${works}`)) return;
+
+    let adminKey = getAdminKey();
+    if (!adminKey) {
+      const fresh = askForPin();
+      if (!fresh) return;
+      adminKey = fresh;
+    }
+    const res = await fetch(`/api/log/${rec.id}`, {
+      method: "DELETE",
+      headers: { "X-Admin-Key": adminKey },
+    });
+    if (!res.ok) {
+      if (res.status === 401) {
+        clearAdminKey();
+        setPinSet(false);
+        alert("Неверный PIN — попробуй ещё раз.");
+      } else {
+        const j = await res.json().catch(() => ({}));
+        alert(`Ошибка: ${j.error ?? res.status}`);
+      }
+      return;
+    }
+    await refreshCar();
   }
 
   return (
@@ -174,15 +232,12 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Hero: form + my-car */}
+      {/* Hero */}
       <div className="mt-5 md:mt-6 grid grid-cols-1 gap-5 md:grid-cols-5 md:gap-6">
-        {/* Form (3 cols) */}
         <div className="md:col-span-3 rounded-3xl bg-soft p-5 md:p-7 shadow-neu">
           <div className="mb-3 flex items-center gap-2">
             <span className="text-accent">🔍</span>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-              Спроси AI
-            </h2>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Спроси AI</h2>
           </div>
 
           <form onSubmit={onAskSubmit} className="flex flex-col gap-4">
@@ -204,7 +259,7 @@ export default function Home() {
               {loading ? (
                 <>
                   <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
-                  <span>Ищу в чате + смотрю историю…</span>
+                  <span>Думаю…</span>
                 </>
               ) : (
                 <>
@@ -216,9 +271,7 @@ export default function Home() {
           </form>
 
           <div className="mt-5">
-            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">
-              Популярные вопросы
-            </p>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Популярные вопросы</p>
             <div className="flex flex-wrap gap-2">
               {EXAMPLES.map((ex) => (
                 <button
@@ -238,23 +291,17 @@ export default function Home() {
           </div>
         </div>
 
-        {/* My car (2 cols) */}
+        {/* Side: Моя машина */}
         <div className="md:col-span-2 rounded-3xl bg-soft p-5 md:p-6 shadow-neu flex flex-col">
           <div className="mb-2 flex items-center gap-2">
             <span className="text-accent">🛠️</span>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-              Моя машина
-            </h2>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Моя машина</h2>
           </div>
 
-          {!car && (
-            <p className="mt-2 text-xs text-muted">Загружаю историю…</p>
-          )}
+          {!car && <p className="mt-2 text-xs text-muted">Загружаю историю…</p>}
 
           {car && car.totalRecords === 0 && (
-            <p className="mt-2 text-xs text-muted">
-              История пуста. Запиши первую работу — AI будет это учитывать в ответах.
-            </p>
+            <p className="mt-2 text-xs text-muted">История пуста. Запиши первую работу.</p>
           )}
 
           {car && car.totalRecords > 0 && (
@@ -264,17 +311,11 @@ export default function Home() {
                   <div className="text-base md:text-lg font-bold text-ink leading-tight">
                     {car.currentMileage ? car.currentMileage.toLocaleString("ru-RU") : "—"}
                   </div>
-                  <div className="mt-0.5 text-[10px] md:text-xs text-muted leading-tight">
-                    км пробег
-                  </div>
+                  <div className="mt-0.5 text-[10px] md:text-xs text-muted leading-tight">км пробег</div>
                 </div>
                 <div className="rounded-2xl bg-bg p-3 text-center shadow-neuInsetSm">
-                  <div className="text-base md:text-lg font-bold text-ink leading-tight">
-                    {car.totalRecords}
-                  </div>
-                  <div className="mt-0.5 text-[10px] md:text-xs text-muted leading-tight">
-                    записей
-                  </div>
+                  <div className="text-base md:text-lg font-bold text-ink leading-tight">{car.totalRecords}</div>
+                  <div className="mt-0.5 text-[10px] md:text-xs text-muted leading-tight">записей</div>
                 </div>
               </div>
 
@@ -284,7 +325,9 @@ export default function Home() {
                 </div>
                 <ul className="mt-1.5 space-y-0.5 text-xs text-ink/85">
                   {car.lastWorks.map((w, i) => (
-                    <li key={i} className="leading-snug">• {w}</li>
+                    <li key={i} className="leading-snug">
+                      • {w}
+                    </li>
                   ))}
                 </ul>
               </div>
@@ -329,9 +372,7 @@ export default function Home() {
               >
                 {logSaving ? "Сохраняю…" : "Сохранить"}
               </button>
-              {logMessage && (
-                <p className="text-[11px] text-muted leading-snug">{logMessage}</p>
-              )}
+              {logMessage && <p className="text-[11px] text-muted leading-snug">{logMessage}</p>}
               {pinSet && (
                 <button
                   type="button"
@@ -343,10 +384,82 @@ export default function Home() {
               )}
             </div>
           )}
+
+          {/* Все записи */}
+          {records.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setRecordsOpen((x) => !x)}
+              className="mt-3 rounded-2xl bg-bg px-3 py-2.5 text-xs md:text-sm font-medium text-ink shadow-neuSm transition active:shadow-neuInsetSm flex items-center justify-center gap-1.5"
+            >
+              <span>📋</span>
+              <span>{recordsOpen ? "Скрыть записи" : `Все записи (${records.length})`}</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Loading skeleton */}
+      {/* Records list */}
+      {recordsOpen && records.length > 0 && (
+        <div className="mt-5 md:mt-6 rounded-3xl bg-soft p-5 md:p-7 shadow-neu">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-accent">📋</span>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Все записи</h2>
+          </div>
+          <div className="space-y-2.5">
+            {records.map((r) => (
+              <div key={r.id} className="rounded-2xl bg-bg p-3.5 shadow-neuInsetSm">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs text-muted">
+                      {r.date} · {r.mileage_km ? `${r.mileage_km.toLocaleString("ru-RU")} км` : "—"}
+                      {r.source === "summary" && <span className="ml-1 text-[10px] opacity-70">(сводка)</span>}
+                      {r.source === "seed" && <span className="ml-1 text-[10px] opacity-70">(из истории)</span>}
+                    </div>
+                    <ul className="mt-1 space-y-0.5 text-sm text-ink/90">
+                      {r.works.slice(0, 5).map((w, i) => (
+                        <li key={i}>• {w}</li>
+                      ))}
+                      {r.works.length > 5 && (
+                        <li className="text-xs text-muted">…и ещё {r.works.length - 5}</li>
+                      )}
+                    </ul>
+                    {r.parts && r.parts.length > 0 && (
+                      <div className="mt-1.5 text-[11px] text-muted">
+                        🛠 {r.parts.map((p) => `${p.brand ?? ""} ${p.name}${p.article ? ` (${p.article})` : ""}`.trim()).join(", ")}
+                      </div>
+                    )}
+                    {r.cost_total != null && (
+                      <div className="mt-1 text-[11px] text-muted">💰 {r.cost_total.toLocaleString("ru-RU")} ₽</div>
+                    )}
+                    {r.notes && <div className="mt-1 text-[11px] text-muted italic">{r.notes}</div>}
+                  </div>
+                  <div className="flex shrink-0 flex-col gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setEditing(r)}
+                      title="Редактировать"
+                      className="rounded-xl bg-soft px-2.5 py-1.5 text-xs shadow-neuSm active:shadow-neuInsetSm"
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteRecord(r)}
+                      title="Удалить"
+                      className="rounded-xl bg-soft px-2.5 py-1.5 text-xs shadow-neuSm active:shadow-neuInsetSm"
+                    >
+                      🗑
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Loading */}
       {loading && (
         <div className="mt-5 md:mt-6 rounded-3xl bg-soft p-5 md:p-7 shadow-neu">
           <div className="flex items-center gap-3 text-muted">
@@ -374,14 +487,10 @@ export default function Home() {
             <span className="grid h-7 w-7 place-items-center rounded-xl bg-accent text-white text-sm shadow-neuSm">
               💬
             </span>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-              Ответ
-            </h2>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Ответ</h2>
           </div>
 
-          <div className="whitespace-pre-wrap text-[15px] leading-relaxed text-ink">
-            {data.answer}
-          </div>
+          <div className="whitespace-pre-wrap text-[15px] leading-relaxed text-ink">{data.answer}</div>
 
           {data.sources.length > 0 && (
             <div className="mt-6 border-t border-bg pt-5">
@@ -390,10 +499,7 @@ export default function Home() {
               </h3>
               <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
                 {data.sources.map((s) => (
-                  <details
-                    key={s.id}
-                    className="group rounded-2xl bg-bg p-3.5 shadow-neuInsetSm cursor-pointer transition"
-                  >
+                  <details key={s.id} className="group rounded-2xl bg-bg p-3.5 shadow-neuInsetSm cursor-pointer transition">
                     <summary className="flex items-center justify-between gap-2 text-xs md:text-sm list-none [&::-webkit-details-marker]:hidden">
                       <span className="flex items-center gap-2 text-ink/90 font-medium min-w-0">
                         <span className="text-accent">📅</span>
@@ -402,9 +508,7 @@ export default function Home() {
                         <span className="text-muted shrink-0">{s.message_count} сооб.</span>
                       </span>
                       <span className="flex items-center gap-2 shrink-0">
-                        {s.reactions_total > 0 && (
-                          <span className="text-xs text-muted">❤ {s.reactions_total}</span>
-                        )}
+                        {s.reactions_total > 0 && <span className="text-xs text-muted">❤ {s.reactions_total}</span>}
                         <span className="text-muted text-xs group-open:rotate-90 transition-transform">▶</span>
                       </span>
                     </summary>
@@ -422,6 +526,175 @@ export default function Home() {
       <p className="mt-8 mb-4 text-center text-[11px] md:text-xs text-muted">
         Orlando-AI · твой персональный помощник по Орландо
       </p>
+
+      {/* Edit modal */}
+      {editing && (
+        <EditModal
+          record={editing}
+          onClose={() => setEditing(null)}
+          onSaved={async () => {
+            setEditing(null);
+            await refreshCar();
+          }}
+        />
+      )}
     </main>
+  );
+}
+
+function EditModal({
+  record,
+  onClose,
+  onSaved,
+}: {
+  record: ServiceRecord;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [date, setDate] = useState(record.date);
+  const [mileage, setMileage] = useState(record.mileage_km != null ? String(record.mileage_km) : "");
+  const [works, setWorks] = useState(record.works.join("\n"));
+  const [materials, setMaterials] = useState(record.materials.join("\n"));
+  const [costTotal, setCostTotal] = useState(record.cost_total != null ? String(record.cost_total) : "");
+  const [notes, setNotes] = useState(record.notes ?? "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    setSaving(true);
+    setErr(null);
+    let adminKey = getAdminKey();
+    if (!adminKey) {
+      const k = prompt("Введи PIN-код:");
+      if (!k) {
+        setSaving(false);
+        return;
+      }
+      setAdminKey(k);
+      adminKey = k;
+    }
+    try {
+      const patch: Record<string, unknown> = {
+        date,
+        mileage_km: mileage.trim() === "" ? null : Number(mileage),
+        works: works.split("\n").map((s) => s.trim()).filter(Boolean),
+        materials: materials.split("\n").map((s) => s.trim()).filter(Boolean),
+        cost_total: costTotal.trim() === "" ? null : Number(costTotal),
+        notes: notes.trim() === "" ? null : notes.trim(),
+      };
+      const res = await fetch(`/api/log/${record.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "X-Admin-Key": adminKey },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        if (res.status === 401) {
+          clearAdminKey();
+          setErr("Неверный PIN.");
+        } else {
+          const j = await res.json().catch(() => ({}));
+          setErr(j.error ?? `HTTP ${res.status}`);
+        }
+        return;
+      }
+      onSaved();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-3">
+      <div className="w-full max-w-md rounded-3xl bg-soft p-5 md:p-6 shadow-neu max-h-[90vh] overflow-y-auto">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">✏️ Редактировать</h3>
+          <button onClick={onClose} className="text-muted text-xl leading-none">
+            ×
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <Field label="Дата (YYYY-MM-DD)">
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full rounded-2xl bg-bg px-3 py-2 text-sm shadow-neuInsetSm outline-none"
+            />
+          </Field>
+          <Field label="Пробег (км)">
+            <input
+              type="number"
+              value={mileage}
+              onChange={(e) => setMileage(e.target.value)}
+              className="w-full rounded-2xl bg-bg px-3 py-2 text-sm shadow-neuInsetSm outline-none"
+              placeholder="200000"
+            />
+          </Field>
+          <Field label="Работы (по одной на строку)">
+            <textarea
+              value={works}
+              onChange={(e) => setWorks(e.target.value)}
+              rows={3}
+              className="w-full resize-none rounded-2xl bg-bg px-3 py-2 text-sm shadow-neuInsetSm outline-none"
+            />
+          </Field>
+          <Field label="Материалы (по одному на строку)">
+            <textarea
+              value={materials}
+              onChange={(e) => setMaterials(e.target.value)}
+              rows={2}
+              className="w-full resize-none rounded-2xl bg-bg px-3 py-2 text-sm shadow-neuInsetSm outline-none"
+            />
+          </Field>
+          <Field label="Стоимость, ₽ (всего)">
+            <input
+              type="number"
+              value={costTotal}
+              onChange={(e) => setCostTotal(e.target.value)}
+              className="w-full rounded-2xl bg-bg px-3 py-2 text-sm shadow-neuInsetSm outline-none"
+              placeholder="3200"
+            />
+          </Field>
+          <Field label="Заметка">
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              className="w-full resize-none rounded-2xl bg-bg px-3 py-2 text-sm shadow-neuInsetSm outline-none"
+            />
+          </Field>
+        </div>
+
+        {err && <p className="mt-3 text-xs text-red-600">⚠ {err}</p>}
+
+        <div className="mt-4 flex gap-2">
+          <button
+            onClick={onClose}
+            className="flex-1 rounded-2xl bg-bg px-3 py-2.5 text-sm font-medium text-ink shadow-neuSm active:shadow-neuInsetSm"
+          >
+            Отмена
+          </button>
+          <button
+            onClick={save}
+            disabled={saving}
+            className="flex-1 rounded-2xl bg-accent px-3 py-2.5 text-sm font-semibold text-white shadow-neuSm active:shadow-neuInsetSm disabled:opacity-50"
+          >
+            {saving ? "Сохраняю…" : "Сохранить"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[10px] uppercase tracking-wide text-muted">{label}</span>
+      {children}
+    </label>
   );
 }

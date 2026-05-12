@@ -1,4 +1,4 @@
-import { httpGet, httpPost } from "./http";
+import { httpGet, httpPost, httpPatch, httpDelete } from "./http";
 import type { ServicePart } from "./types";
 
 export type ServiceRecord = {
@@ -52,6 +52,35 @@ export async function insertServiceRecord(rec: Partial<ServiceRecord>): Promise<
   }
   const arr = JSON.parse(res.body) as ServiceRecord[];
   return arr[0];
+}
+
+export async function updateServiceRecord(
+  id: string,
+  patch: Partial<ServiceRecord>
+): Promise<ServiceRecord> {
+  const res = await httpPatch(
+    sbUrl(`/rest/v1/service_records?id=eq.${encodeURIComponent(id)}`),
+    patch,
+    { ...sbAuth(), Prefer: "return=representation" },
+    15_000
+  );
+  if (res.status >= 400) {
+    throw new Error(`Supabase update service_records ${res.status}: ${res.body.slice(0, 300)}`);
+  }
+  const arr = JSON.parse(res.body) as ServiceRecord[];
+  if (arr.length === 0) throw new Error("Record not found");
+  return arr[0];
+}
+
+export async function deleteServiceRecord(id: string): Promise<void> {
+  const res = await httpDelete(
+    sbUrl(`/rest/v1/service_records?id=eq.${encodeURIComponent(id)}`),
+    sbAuth(),
+    15_000
+  );
+  if (res.status >= 400) {
+    throw new Error(`Supabase delete service_records ${res.status}: ${res.body.slice(0, 300)}`);
+  }
 }
 
 function fmtDate(d: string): string {
