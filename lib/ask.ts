@@ -1,7 +1,7 @@
 import { embed } from "./mistral";
 import { rpcSearchThreads, type SearchResult } from "./supabase-rest";
 import { chat } from "./openrouter";
-import { getServiceRecords, formatHistoryForPrompt } from "./car";
+import { getServiceRecords, formatHistoryForPrompt, extractMileageFromQuestion } from "./car";
 
 const TOP_K_FOR_LLM = 8;
 
@@ -17,9 +17,14 @@ const SYSTEM_PROMPT = `Ты — AI-ассистент владельца Chevrol
 
 КРИТИЧЕСКИЕ ПРАВИЛА:
 - НИКОГДА не выдумывай даты, пробеги, артикулы, цены. Используй ТОЛЬКО то что явно есть в истории машины.
-- В истории каждой записи уже посчитаны интервалы — "X месяцев назад, +Y км". НЕ СЧИТАЙ САМ, бери готовое число.
+- В истории каждой записи уже посчитаны интервалы "X месяцев назад, +Y км" — это ОФИЦИАЛЬНЫЕ числа, бери их как есть. НЕ ПЕРЕСЧИТЫВАЙ САМ.
+- В шапке истории есть строка "АКТУАЛЬНЫЙ ПРОБЕГ: N км" — это текущий пробег машины. Все "сколько пройдено с тех пор" уже считаются от него.
 - Если запись помечена как "сводка" / без точной даты — НЕ ПРИПИСЫВАЙ ей дату или пробег.
 - Если в истории нет ответа на вопрос — честно скажи "в истории не записано".
+
+ПРИМЕРЫ ВЕРНЫХ ФОРМУЛИРОВОК:
+- "АКТУАЛЬНЫЙ ПРОБЕГ: 200 500 км" + запись "199 000 км [3 мес. назад, пробег с тех пор +1 500 км]" → говори "С последней замены прошло 3 месяца и 1 500 км".
+- Не считай разницу руками — она уже в квадратных скобках.
 
 ФОРМАТ ОТВЕТА:
 - Сначала экспертный ответ кратко и по делу (2–4 абзаца). Если уместно — упомяни персональную историю с точными датами и цифрами из истории.
@@ -58,7 +63,9 @@ export async function askOrlando(question: string): Promise<AskAnswer> {
   let historyBlock = "";
   try {
     const records = await getServiceRecords(30);
-    historyBlock = formatHistoryForPrompt(records);
+    // если пользователь в вопросе явно указал свой текущий пробег — пересчитываем относительно него
+    const currentMileageFromQuestion = extractMileageFromQuestion(question);
+    historyBlock = formatHistoryForPrompt(records, currentMileageFromQuestion);
   } catch {
     historyBlock = "";
   }

@@ -106,18 +106,46 @@ function monthsBetween(fromIso: string, toIso: string): number {
   return Math.max(0, months);
 }
 
-/** Сборка краткой истории для подмешивания в системный промпт ИИ. */
-export function formatHistoryForPrompt(records: ServiceRecord[]): string {
+/** Извлекает явно названный текущий пробег из вопроса пользователя.
+ *  Распознаёт: "сейчас 200500", "пробег 200к", "сегодня 200 500 км", "200 500" и т.п. */
+export function extractMileageFromQuestion(question: string): number | null {
+  // патерны с явным контекстом
+  const ctx = /(?:сейчас|сегодня|на\s+данный\s+момент|пробег)[^\d]{0,15}(\d[\d\s.,]{2,12})\s*(?:км|k|к|тыс)?/i;
+  const m = question.match(ctx);
+  if (m) {
+    const raw = m[1].replace(/[\s.,]/g, "");
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 1000 && n < 1_500_000) return n;
+  }
+  // "200к" / "200 000 км" одиночно
+  const single = /(\d[\d\s]{3,10})\s*(?:км|к|k)/i;
+  const m2 = question.match(single);
+  if (m2) {
+    const raw = m2[1].replace(/\s/g, "");
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 1000 && n < 1_500_000) return n;
+  }
+  return null;
+}
+
+/** Сборка краткой истории для подмешивания в системный промпт ИИ.
+ *  currentMileageOverride — если пользователь явно указал актуальный пробег в вопросе. */
+export function formatHistoryForPrompt(
+  records: ServiceRecord[],
+  currentMileageOverride?: number | null
+): string {
   if (records.length === 0) return "";
 
   const today = new Date().toISOString().slice(0, 10);
   const latest = records[0];
-  const currentMileage = latest.mileage_km;
+  const currentMileage = currentMileageOverride ?? latest.mileage_km;
   const headLines = [
     currentMileage
-      ? `Текущий пробег (по последней записи): ${currentMileage.toLocaleString("ru-RU")} км`
+      ? `АКТУАЛЬНЫЙ ПРОБЕГ: ${currentMileage.toLocaleString("ru-RU")} км${
+          currentMileageOverride ? " (указан владельцем в вопросе)" : " (по последней записи)"
+        }`
       : null,
-    `Последняя запись: ${fmtDate(latest.date)} (сегодня ${fmtDate(today)})`,
+    `Сегодня: ${fmtDate(today)}. Последняя запись: ${fmtDate(latest.date)}.`,
   ].filter(Boolean);
 
   const lines = records.slice(0, 30).map((r) => {
