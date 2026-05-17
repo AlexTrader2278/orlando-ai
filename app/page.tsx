@@ -50,6 +50,18 @@ type CarSummary = {
 
 type CarResponse = { summary: CarSummary; records: ServiceRecord[]; error?: string };
 
+type ParsedPreview = {
+  date: string;
+  mileage_km: number | null;
+  works: string[];
+  materials: string[];
+  parts: ServicePart[];
+  cost_works: number | null;
+  cost_materials: number | null;
+  cost_total: number | null;
+  notes: string | null;
+};
+
 const EXAMPLES = [
   "Когда пора менять масло?",
   "Цепь ГРМ — пора?",
@@ -86,6 +98,7 @@ export default function Home() {
   const [logText, setLogText] = useState("");
   const [logSaving, setLogSaving] = useState(false);
   const [logMessage, setLogMessage] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ParsedPreview | null>(null);
 
   async function refreshCar() {
     try {
@@ -139,24 +152,59 @@ export default function Home() {
     setLogMessage("PIN удалён из браузера.");
   }
 
-  async function saveLog() {
+  function resolveAdminKey(): string | null {
+    const existing = getAdminKey();
+    if (existing) return existing;
+    return askForPin();
+  }
+
+  // Шаг 1: распознать текст и показать превью — в БД пока ничего не пишется.
+  async function previewLog() {
     if (logText.trim().length < 5) return;
     setLogSaving(true);
     setLogMessage(null);
+    setPreview(null);
     try {
-      let adminKey = getAdminKey();
-      if (!adminKey) {
-        const fresh = askForPin();
-        if (!fresh) {
-          setLogSaving(false);
-          return;
-        }
-        adminKey = fresh;
-      }
+      const adminKey = resolveAdminKey();
+      if (!adminKey) return;
       const res = await fetch("/api/log", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Admin-Key": adminKey },
         body: JSON.stringify({ text: logText.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        if (res.status === 401) {
+          clearAdminKey();
+          setPinSet(false);
+          setLogMessage("Неверный PIN. Нажми «Проверить» снова.");
+        } else if (res.status === 422) {
+          setLogMessage(`Не распозналось: ${json.error}. Поправь текст и попробуй снова.`);
+        } else {
+          setLogMessage(`Ошибка: ${json.error ?? res.status}`);
+        }
+        return;
+      }
+      setPreview(json.preview as ParsedPreview);
+    } catch (e) {
+      setLogMessage(`Ошибка: ${(e as Error).message}`);
+    } finally {
+      setLogSaving(false);
+    }
+  }
+
+  // Шаг 2: пользователь подтвердил превью — только теперь пишем в БД.
+  async function confirmLog() {
+    if (!preview) return;
+    setLogSaving(true);
+    setLogMessage(null);
+    try {
+      const adminKey = resolveAdminKey();
+      if (!adminKey) return;
+      const res = await fetch("/api/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Admin-Key": adminKey },
+        body: JSON.stringify({ confirm: true, record: preview }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -171,12 +219,18 @@ export default function Home() {
       }
       setLogMessage("✓ Записано. AI теперь это учитывает.");
       setLogText("");
+      setPreview(null);
       await refreshCar();
     } catch (e) {
       setLogMessage(`Ошибка: ${(e as Error).message}`);
     } finally {
       setLogSaving(false);
     }
+  }
+
+  function cancelPreview() {
+    setPreview(null);
+    setLogMessage(null);
   }
 
   async function deleteRecord(rec: ServiceRecord) {
@@ -364,14 +418,73 @@ export default function Home() {
                   className="w-full resize-none rounded-2xl bg-transparent px-3 py-2.5 text-xs md:text-sm outline-none placeholder:text-muted/70"
                 />
               </div>
-              <button
-                type="button"
-                onClick={saveLog}
-                disabled={logSaving || logText.trim().length < 5}
-                className="rounded-2xl bg-accent px-3 py-2.5 text-xs md:text-sm font-semibold text-white shadow-neuSm transition active:shadow-neuInsetSm disabled:opacity-50"
-              >
-                {logSaving ? "Сохраняю…" : "Сохранить"}
-              </button>
+              {!preview && (
+                <button
+                  type="button"
+                  onClick={previewLog}
+                  disabled={logSaving || logText.trim().length < 5}
+                  className="rounded-2xl bg-accent px-3 py-2.5 text-xs md:text-sm font-semibold text-white shadow-neuSm transition active:shadow-neuInsetSm disabled:opacity-50"
+                >
+                  {logSaving ? "Распознаю…" : "Проверить"}
+                </button>
+              )}
+
+              {preview && (
+                <div className="rounded-2xl bg-bg p-3 shadow-neuInsetSm flex flex-col gap-1.5">
+                  <p className="text-[10px] uppercase tracking-wide text-muted">
+                    Проверь, что AI понял:
+                  </p>
+                  <div className="text-xs text-ink/90">
+                    📅 {preview.date} ·{" "}
+                    {preview.mileage_km != null
+                      ? `🛣 ${preview.mileage_km.toLocaleString("ru-RU")} км`
+                      : "пробег не указан"}
+                  </div>
+                  {preview.works.length > 0 && (
+                    <ul className="space-y-0.5 text-xs text-ink/85">
+                      {preview.works.map((w, i) => (
+                        <li key={i}>• {w}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {preview.parts.length > 0 && (
+                    <div className="text-[11px] text-muted">
+                      🛠{" "}
+                      {preview.parts
+                        .map((p) =>
+                          `${p.brand ?? ""} ${p.name}${p.article ? ` (${p.article})` : ""}`.trim()
+                        )
+                        .join(", ")}
+                    </div>
+                  )}
+                  {preview.cost_total != null && (
+                    <div className="text-[11px] text-muted">
+                      💰 {preview.cost_total.toLocaleString("ru-RU")} ₽
+                    </div>
+                  )}
+                  {preview.notes && (
+                    <div className="text-[11px] text-muted italic">{preview.notes}</div>
+                  )}
+                  <div className="mt-1 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={cancelPreview}
+                      disabled={logSaving}
+                      className="flex-1 rounded-2xl bg-soft px-3 py-2 text-xs font-medium text-ink shadow-neuSm active:shadow-neuInsetSm disabled:opacity-50"
+                    >
+                      ✗ Отмена
+                    </button>
+                    <button
+                      type="button"
+                      onClick={confirmLog}
+                      disabled={logSaving}
+                      className="flex-1 rounded-2xl bg-accent px-3 py-2 text-xs font-semibold text-white shadow-neuSm active:shadow-neuInsetSm disabled:opacity-50"
+                    >
+                      {logSaving ? "Сохраняю…" : "✓ Сохранить"}
+                    </button>
+                  </div>
+                </div>
+              )}
               {logMessage && <p className="text-[11px] text-muted leading-snug">{logMessage}</p>}
               {pinSet && (
                 <button

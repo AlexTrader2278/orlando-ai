@@ -60,13 +60,7 @@ export async function parseFreeText(text: string, today: string): Promise<Parsed
     { model: "openai/gpt-4o-mini", temperature: 0.1, maxTokens: 1200 }
   );
 
-  // Иногда модели обрамляют ответ в ```json ... ``` — почистим.
-  const cleaned = content
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-
-  const parsed = JSON.parse(cleaned) as Partial<ParsedRecord>;
+  const parsed = JSON.parse(extractJson(content)) as Partial<ParsedRecord>;
 
   const parts: ServicePart[] = Array.isArray(parsed.parts)
     ? parsed.parts
@@ -92,5 +86,90 @@ export async function parseFreeText(text: string, today: string): Promise<Parsed
     cost_materials: parsed.cost_materials ?? null,
     cost_total: parsed.cost_total ?? null,
     notes: parsed.notes ?? null,
+  };
+}
+
+/** Достаёт JSON из ответа модели, даже если она обернула его в ```` ```json ````
+ *  или добавила текст до/после. Падает дальше по стеку, только если { } нет вовсе. */
+function extractJson(raw: string): string {
+  const stripped = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  try {
+    JSON.parse(stripped);
+    return stripped;
+  } catch {
+    const first = stripped.indexOf("{");
+    const last = stripped.lastIndexOf("}");
+    if (first !== -1 && last > first) return stripped.slice(first, last + 1);
+    return stripped;
+  }
+}
+
+export type ValidationResult =
+  | { ok: true; record: ParsedRecord }
+  | { ok: false; error: string };
+
+function cleanMoney(v: number | null | undefined): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n);
+}
+
+/** Проверяет распознанную запись ПЕРЕД записью в БД.
+ *  Структурные ошибки (пустая запись, кривая/будущая дата, абсурдный пробег)
+ *  блокируют сохранение. Мусор в суммах тихо обнуляется, данные не теряются. */
+export function validateParsedRecord(rec: ParsedRecord, today: string): ValidationResult {
+  const errors: string[] = [];
+
+  const date = String(rec.date ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    errors.push(`непонятная дата: "${rec.date}"`);
+  } else if (date > today) {
+    errors.push(`дата в будущем: ${date} (сегодня ${today})`);
+  }
+
+  let mileage = rec.mileage_km;
+  if (mileage != null) {
+    const n = Number(mileage);
+    if (!Number.isFinite(n) || n < 100 || n > 2_000_000) {
+      errors.push(`подозрительный пробег: ${rec.mileage_km}`);
+    } else {
+      mileage = Math.round(n);
+    }
+  }
+
+  const works = Array.isArray(rec.works)
+    ? rec.works.map((s) => String(s).trim()).filter(Boolean)
+    : [];
+  const materials = Array.isArray(rec.materials)
+    ? rec.materials.map((s) => String(s).trim()).filter(Boolean)
+    : [];
+  const parts = Array.isArray(rec.parts) ? rec.parts : [];
+  const notes = rec.notes && String(rec.notes).trim() ? String(rec.notes).trim() : null;
+
+  if (works.length === 0 && parts.length === 0 && !notes) {
+    errors.push("не распозналось ни одной работы, детали или заметки");
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, error: errors.join("; ") };
+  }
+
+  return {
+    ok: true,
+    record: {
+      date,
+      mileage_km: mileage ?? null,
+      works,
+      materials,
+      parts,
+      cost_works: cleanMoney(rec.cost_works),
+      cost_materials: cleanMoney(rec.cost_materials),
+      cost_total: cleanMoney(rec.cost_total),
+      notes,
+    },
   };
 }

@@ -11,3 +11,4 @@ data/*.gz
 .vercel
 .DS_Store
 *.log
+tsconfig.tsbuildinfo
