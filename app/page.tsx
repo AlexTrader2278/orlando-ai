@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Source = {
   id: string;
@@ -99,6 +99,13 @@ export default function Home() {
   const [logSaving, setLogSaving] = useState(false);
   const [logMessage, setLogMessage] = useState<string | null>(null);
   const [preview, setPreview] = useState<ParsedPreview | null>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (preview && previewRef.current) {
+      previewRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [preview]);
 
   async function refreshCar() {
     try {
@@ -430,9 +437,12 @@ export default function Home() {
               )}
 
               {preview && (
-                <div className="rounded-2xl bg-bg p-3 shadow-neuInsetSm flex flex-col gap-1.5">
+                <div ref={previewRef} className="rounded-2xl bg-bg p-3 shadow-neuInsetSm flex flex-col gap-1.5 scroll-mt-24">
+                  <div className="rounded-xl bg-amber-100 px-3 py-2 text-[11px] font-semibold text-amber-800">
+                    ⚠️ ЕЩЁ НЕ СОХРАНЕНО. Проверь и нажми «✓ Сохранить в базу» ниже.
+                  </div>
                   <p className="text-[10px] uppercase tracking-wide text-muted">
-                    Проверь, что AI понял:
+                    Что AI понял:
                   </p>
                   <div className="text-xs text-ink/90">
                     📅 {preview.date} ·{" "}
@@ -440,6 +450,11 @@ export default function Home() {
                       ? `🛣 ${preview.mileage_km.toLocaleString("ru-RU")} км`
                       : "пробег не указан"}
                   </div>
+                  {preview.mileage_km == null && (
+                    <div className="rounded-xl bg-blue-50 px-3 py-1.5 text-[10px] text-blue-700">
+                      💡 Пробег не указан → счётчик «км пробег» не изменится. Если нужно — нажми «Отмена», допиши пробег в текст и проверь снова.
+                    </div>
+                  )}
                   {preview.works.length > 0 && (
                     <ul className="space-y-0.5 text-xs text-ink/85">
                       {preview.works.map((w, i) => (
@@ -478,9 +493,9 @@ export default function Home() {
                       type="button"
                       onClick={confirmLog}
                       disabled={logSaving}
-                      className="flex-1 rounded-2xl bg-accent px-3 py-2 text-xs font-semibold text-white shadow-neuSm active:shadow-neuInsetSm disabled:opacity-50"
+                      className="flex-[2] rounded-2xl bg-accent px-3 py-3 text-sm font-bold text-white shadow-neuSm active:shadow-neuInsetSm disabled:opacity-50"
                     >
-                      {logSaving ? "Сохраняю…" : "✓ Сохранить"}
+                      {logSaving ? "Сохраняю…" : "✓ Сохранить в базу"}
                     </button>
                   </div>
                 </div>
