@@ -524,6 +524,24 @@ export default function Home() {
               <span>{recordsOpen ? "Скрыть записи" : `Все записи (${records.length})`}</span>
             </button>
           )}
+
+          {/* Скачать базу */}
+          {records.length > 0 && (
+            <div className="mt-2 flex gap-2">
+              <a
+                href="/api/export?format=csv"
+                className="flex-1 rounded-2xl bg-bg px-3 py-2 text-center text-[11px] md:text-xs font-medium text-ink shadow-neuSm transition active:shadow-neuInsetSm"
+              >
+                ⬇️ Excel (CSV)
+              </a>
+              <a
+                href="/api/export?format=json"
+                className="flex-1 rounded-2xl bg-bg px-3 py-2 text-center text-[11px] md:text-xs font-medium text-ink shadow-neuSm transition active:shadow-neuInsetSm"
+              >
+                ⬇️ Бэкап (JSON)
+              </a>
+            </div>
+          )}
         </div>
       </div>
 
