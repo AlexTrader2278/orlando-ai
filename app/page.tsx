@@ -580,24 +580,28 @@ export default function Home() {
                     )}
                     {r.notes && <div className="mt-1 text-[11px] text-muted italic">{r.notes}</div>}
                   </div>
-                  <div className="flex shrink-0 flex-col gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setEditing(r)}
-                      title="Редактировать"
-                      className="rounded-xl bg-soft px-2.5 py-1.5 text-xs shadow-neuSm active:shadow-neuInsetSm"
-                    >
-                      ✏️
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deleteRecord(r)}
-                      title="Удалить"
-                      className="rounded-xl bg-soft px-2.5 py-1.5 text-xs shadow-neuSm active:shadow-neuInsetSm"
-                    >
-                      🗑
-                    </button>
-                  </div>
+                  {/* Кнопки edit/delete видны только владельцу с PIN.
+                      Гостям бэкенд вернёт 401, но прятать UI чище. */}
+                  {pinSet && (
+                    <div className="flex shrink-0 flex-col gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEditing(r)}
+                        title="Редактировать"
+                        className="rounded-xl bg-soft px-2.5 py-1.5 text-xs shadow-neuSm active:shadow-neuInsetSm"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteRecord(r)}
+                        title="Удалить"
+                        className="rounded-xl bg-soft px-2.5 py-1.5 text-xs shadow-neuSm active:shadow-neuInsetSm"
+                      >
+                        🗑
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
