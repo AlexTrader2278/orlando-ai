@@ -12,10 +12,13 @@ module.exports = {
         accentInk: "#1e3a8a",
       },
       boxShadow: {
-        neu: "8px 8px 24px #c8ccd6, -8px -8px 24px #ffffff",
-        neuSm: "4px 4px 12px #c8ccd6, -4px -4px 12px #ffffff",
-        neuInset: "inset 5px 5px 12px #c8ccd6, inset -5px -5px 12px #ffffff",
-        neuInsetSm: "inset 3px 3px 8px #c8ccd6, inset -3px -3px 8px #ffffff",
+        // Выпуклые элементы (карточки, выпуклые кнопки): тёмная тень сильнее, blur больше
+        neu: "10px 10px 28px #b0b6c6, -10px -10px 28px #ffffff",
+        neuSm: "5px 5px 14px #aab0c0, -5px -5px 14px #ffffff",
+        // Утопленные элементы (textarea, input, превью): тёмная тень глубже + spread,
+        // светлая тень светлее для контраста — теперь visibly «продавлено»
+        neuInset: "inset 7px 7px 16px #9aa3b5, inset -7px -7px 16px #ffffff",
+        neuInsetSm: "inset 5px 5px 11px #9aa3b5, inset -5px -5px 11px #ffffff",
       },
     },
   },
