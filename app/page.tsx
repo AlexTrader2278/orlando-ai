@@ -140,6 +140,28 @@ export default function Home() {
     }
   }
 
+  // Сводка ТОЛЬКО по чату сообщества (без истории моей машины).
+  async function summarizeFindings(q: string) {
+    if (q.trim().length < 2) return;
+    setLoading(true);
+    setError(null);
+    setData(null);
+    try {
+      const res = await fetch("/api/summarize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q.trim() }),
+      });
+      const json = (await res.json()) as AskResponse;
+      if (!res.ok) setError(json.error ?? `HTTP ${res.status}`);
+      else setData(json);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function onAskSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (question.trim().length < 5) return;
@@ -312,23 +334,35 @@ export default function Home() {
               />
             </div>
 
-            <button
-              type="submit"
-              disabled={loading || question.trim().length < 5}
-              className="rounded-2xl bg-accent px-5 py-3.5 text-sm font-semibold text-white shadow-neuSm transition hover:opacity-95 active:shadow-neuInsetSm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {loading ? (
-                <>
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
-                  <span>Думаю…</span>
-                </>
-              ) : (
-                <>
-                  <span>⚡</span>
-                  <span>Спросить</span>
-                </>
-              )}
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="submit"
+                disabled={loading || question.trim().length < 5}
+                className="flex-1 rounded-2xl bg-accent px-5 py-3.5 text-sm font-semibold text-white shadow-neuSm transition hover:opacity-95 active:shadow-neuInsetSm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
+                    <span>Думаю…</span>
+                  </>
+                ) : (
+                  <>
+                    <span>⚡</span>
+                    <span>Спросить</span>
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => summarizeFindings(question)}
+                disabled={loading || question.trim().length < 5}
+                title="AI-сводка только по обсуждениям сообщества (без моей истории)"
+                className="flex-1 rounded-2xl bg-bg px-5 py-3.5 text-sm font-semibold text-ink shadow-neuSm transition hover:opacity-95 active:shadow-neuInsetSm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <span>📝</span>
+                <span>Суммировать находки</span>
+              </button>
+            </div>
           </form>
 
           <div className="mt-5">
