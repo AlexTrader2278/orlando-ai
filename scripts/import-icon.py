@@ -31,15 +31,41 @@ TARGETS = [
 ]
 
 # Сколько процента канвы занимает лого (остальное — поля цвета фона)
-INNER_SCALE = 0.96
+INNER_SCALE = 0.98
 
 # Что считать «белым/прозрачным» полем при обрезке
 WHITE_THRESHOLD = 240
+
+# Порог для замены белого на прозрачный — чтобы углы скруглённого
+# квадрата исходного лого слились с цветом фона канвы.
+WHITE_TO_ALPHA_FULL = 248   # ≥ — полностью прозрачно
+WHITE_TO_ALPHA_FADE = 200   # ≤ — без изменений (контент)
 
 
 def load(src: Path) -> Image.Image:
     img = Image.open(src)
     return img.convert("RGBA")
+
+
+def whites_to_transparent(img: Image.Image) -> Image.Image:
+    """Делает белый/около-белый фон прозрачным.
+    Светлота min(R,G,B) > FULL → alpha 0; между FADE и FULL — линейно;
+    ниже FADE → без изменений. Цветной контент остаётся как есть."""
+    img = img.convert("RGBA")
+    px = img.load()
+    w, h = img.size
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            mn = min(r, g, b)
+            if mn >= WHITE_TO_ALPHA_FULL:
+                px[x, y] = (r, g, b, 0)
+            elif mn >= WHITE_TO_ALPHA_FADE:
+                # линейный плавный fade на краях скруглений
+                t = (mn - WHITE_TO_ALPHA_FADE) / (WHITE_TO_ALPHA_FULL - WHITE_TO_ALPHA_FADE)
+                new_a = int(a * (1 - t))
+                px[x, y] = (r, g, b, new_a)
+    return img
 
 
 def trim_white_borders(img: Image.Image) -> Image.Image:
@@ -134,10 +160,13 @@ def main() -> None:
 
     bg = dominant_bg_color(trimmed)
     print(f"  bg color: rgb{bg}")
+
+    cleaned = whites_to_transparent(trimmed)
+    print("  whites -> transparent: done")
     print()
 
     for size, name in TARGETS:
-        out = make_full_bleed(trimmed, size, bg)
+        out = make_full_bleed(cleaned, size, bg)
         path = OUT / name
         out.convert("RGB").save(path, "PNG", optimize=True)
         print(f"  OK {name} ({size}x{size}) - {path.stat().st_size // 1024} KB")

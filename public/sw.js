@@ -5,7 +5,7 @@
  *   - навигация (HTML)     → network-first, при провале — последний кэш / офлайн-страница
  *   - статика (JS/CSS/img) → stale-while-revalidate (быстро + фоновое обновление)
  */
-const VERSION = "v5";
+const VERSION = "v6";
 const STATIC_CACHE = `oai-static-${VERSION}`;
 const PAGES_CACHE = `oai-pages-${VERSION}`;
 
