@@ -5,14 +5,13 @@
  *   - навигация (HTML)     → network-first, при провале — последний кэш / офлайн-страница
  *   - статика (JS/CSS/img) → stale-while-revalidate (быстро + фоновое обновление)
  */
-const VERSION = "v3";
+const VERSION = "v4";
 const STATIC_CACHE = `oai-static-${VERSION}`;
 const PAGES_CACHE = `oai-pages-${VERSION}`;
 
 const PRECACHE = [
   "/",
   "/manifest.webmanifest",
-  "/icon.svg",
   "/icon-192.png",
   "/icon-512.png",
   "/apple-touch-icon.png",
