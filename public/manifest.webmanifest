@@ -1,0 +1,49 @@
+{
+  "name": "Orlando-AI — сервисная книжка",
+  "short_name": "Orlando-AI",
+  "description": "Личный AI-помощник владельца Chevrolet Orlando: история ремонтов и вопросы сообществу.",
+  "id": "/?source=pwa",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef0f4",
+  "theme_color": "#1e2a4f",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Записать работу",
+      "short_name": "Запись",
+      "description": "Быстро добавить запись о ремонте",
+      "url": "/?action=log",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Спросить AI",
+      "short_name": "Спросить",
+      "description": "Задать вопрос помощнику",
+      "url": "/?action=ask",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
