@@ -12,9 +12,12 @@ type Source = {
   reactions_total: number;
 };
 
+type Citation = { url: string; title?: string };
+
 type AskResponse = {
   answer: string;
   sources: Source[];
+  citations?: Citation[];
   error?: string;
 };
 
@@ -129,6 +132,28 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: q }),
+      });
+      const json = (await res.json()) as AskResponse;
+      if (!res.ok) setError(json.error ?? `HTTP ${res.status}`);
+      else setData(json);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Поиск в интернете через Perplexity Sonar (актуальные цены, регламенты, форумы).
+  async function askInternet(q: string) {
+    if (q.trim().length < 2) return;
+    setLoading(true);
+    setError(null);
+    setData(null);
+    try {
+      const res = await fetch("/api/sonar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q.trim() }),
       });
       const json = (await res.json()) as AskResponse;
       if (!res.ok) setError(json.error ?? `HTTP ${res.status}`);
@@ -361,6 +386,16 @@ export default function Home() {
               >
                 <span>📝</span>
                 <span>Суммировать находки</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => askInternet(question)}
+                disabled={loading || question.trim().length < 5}
+                title="Поиск в интернете через Perplexity Sonar (актуальные цены, регламенты, форумы)"
+                className="flex-1 rounded-2xl bg-bg px-5 py-3.5 text-sm font-semibold text-ink shadow-neuSm transition hover:opacity-95 active:shadow-neuInsetSm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <span>🌐</span>
+                <span>Спросить в интернете</span>
               </button>
             </div>
           </form>
@@ -675,6 +710,38 @@ export default function Home() {
           </div>
 
           <div className="whitespace-pre-wrap text-[15px] leading-relaxed text-ink">{data.answer}</div>
+
+          {data.citations && data.citations.length > 0 && (
+            <div className="mt-6 border-t border-bg pt-5">
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
+                🌐 Источники из интернета ({data.citations.length})
+              </h3>
+              <ul className="space-y-1.5">
+                {data.citations.map((c, i) => {
+                  let host = c.url;
+                  try {
+                    host = new URL(c.url).hostname.replace(/^www\./, "");
+                  } catch {}
+                  return (
+                    <li key={i} className="rounded-2xl bg-bg px-3.5 py-2.5 shadow-neuInsetSm">
+                      <a
+                        href={c.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-start gap-2 text-xs md:text-sm text-accent hover:underline break-all"
+                      >
+                        <span className="text-muted shrink-0">[{i + 1}]</span>
+                        <span className="min-w-0">
+                          <span className="font-medium">{host}</span>
+                          <span className="ml-1 text-muted text-[11px] break-all">{c.url.length > 80 ? c.url.slice(0, 80) + "…" : c.url}</span>
+                        </span>
+                      </a>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
           {data.sources.length > 0 && (
             <div className="mt-6 border-t border-bg pt-5">
