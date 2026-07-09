@@ -5,12 +5,13 @@
  *   - навигация (HTML)     → network-first, при провале — последний кэш / офлайн-страница
  *   - статика (JS/CSS/img) → stale-while-revalidate (быстро + фоновое обновление)
  */
-const VERSION = "v7";
+const VERSION = "v8";
 const STATIC_CACHE = `oai-static-${VERSION}`;
 const PAGES_CACHE = `oai-pages-${VERSION}`;
 
 const PRECACHE = [
   "/",
+  "/offline.html",
   "/manifest.webmanifest",
   "/icon-192.png",
   "/icon-512.png",
@@ -53,7 +54,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Навигация по страницам — network-first
+  // Навигация по страницам — network-first, при полном промахе — офлайн-страница
   if (req.mode === "navigate") {
     event.respondWith(
       fetch(req)
@@ -62,7 +63,12 @@ self.addEventListener("fetch", (event) => {
           caches.open(PAGES_CACHE).then((c) => c.put(req, copy));
           return res;
         })
-        .catch(() => caches.match(req).then((m) => m || caches.match("/"))),
+        .catch(() =>
+          caches
+            .match(req)
+            .then((m) => m || caches.match("/"))
+            .then((m) => m || caches.match("/offline.html")),
+        ),
     );
     return;
   }

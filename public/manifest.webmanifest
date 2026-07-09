@@ -26,6 +26,13 @@
   ],
   "shortcuts": [
     {
+      "name": "Диагностика",
+      "short_name": "Диагност",
+      "description": "Разобрать симптом или звук со светофором срочности",
+      "url": "/?action=diagnose",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
       "name": "Записать работу",
       "short_name": "Запись",
       "description": "Быстро добавить запись о ремонте",

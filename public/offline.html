@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Orlando-AI — нет сети</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #eef0f4;
+      font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+      color: #2a3142;
+    }
+    .card {
+      max-width: 320px;
+      margin: 16px;
+      padding: 28px 24px;
+      border-radius: 24px;
+      background: linear-gradient(135deg, #1e2a4f 0%, #0f1a35 100%);
+      color: #fff;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(15, 26, 53, 0.35);
+    }
+    .emoji { font-size: 40px; }
+    h1 { font-size: 18px; margin: 12px 0 6px; }
+    p { font-size: 13px; line-height: 1.5; color: #b9c4e0; margin: 0 0 18px; }
+    button {
+      border: 0;
+      border-radius: 14px;
+      padding: 11px 22px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #1e2a4f;
+      background: #fff;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="emoji">🚗📵</div>
+    <h1>Нет сети</h1>
+    <p>Orlando-AI нужен интернет: ответы, диагностика и история машины живут на сервере. Проверь связь и попробуй снова.</p>
+    <button onclick="location.reload()">Повторить</button>
+  </div>
+</body>
+</html>

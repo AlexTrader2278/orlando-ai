@@ -199,6 +199,7 @@ export default function Home() {
   const [editing, setEditing] = useState<ServiceRecord | null>(null);
 
   const [logOpen, setLogOpen] = useState(false);
+  const carCardRef = useRef<HTMLDivElement | null>(null);
   const [logText, setLogText] = useState("");
   const [logSaving, setLogSaving] = useState(false);
   const [logMessage, setLogMessage] = useState<string | null>(null);
@@ -222,6 +223,15 @@ export default function Home() {
   useEffect(() => {
     setPinSet(Boolean(getAdminKey()));
     refreshCar();
+
+    // Шорткаты PWA из manifest.webmanifest: /?action=log|ask|diagnose
+    const action = new URLSearchParams(window.location.search).get("action");
+    if (action === "log") {
+      setLogOpen(true);
+      setTimeout(() => carCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+    } else if (action === "ask" || action === "diagnose") {
+      setTimeout(() => questionRef.current?.focus(), 150);
+    }
   }, []);
 
   async function ask(q: string) {
@@ -667,7 +677,7 @@ export default function Home() {
         </div>
 
         {/* Side: Моя машина */}
-        <div className="md:col-span-2 rounded-3xl bg-soft p-5 md:p-6 shadow-neu flex flex-col">
+        <div ref={carCardRef} className="md:col-span-2 rounded-3xl bg-soft p-5 md:p-6 shadow-neu flex flex-col scroll-mt-4">
           <div className="mb-2 flex items-center gap-2">
             <span className="text-accent">🛠️</span>
             <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Моя машина</h2>
