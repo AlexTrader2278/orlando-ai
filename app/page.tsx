@@ -21,6 +21,34 @@ type AskResponse = {
   error?: string;
 };
 
+type DiagnoseCause = {
+  name: string;
+  confidence: "high" | "med" | "low";
+  why: string;
+};
+
+type DiagnoseResponse = {
+  causes: DiagnoseCause[];
+  severity: "ok" | "soon" | "urgent";
+  checks: string[];
+  uncertain: boolean;
+  questions: string[];
+  sources: Source[];
+  error?: string;
+};
+
+const SEVERITY_META = {
+  ok: { emoji: "🟢", text: "Можно ездить и наблюдать", cls: "bg-emerald-100 text-emerald-800" },
+  soon: { emoji: "🟡", text: "Запишись к мастеру в ближайшее время", cls: "bg-amber-100 text-amber-800" },
+  urgent: { emoji: "🔴", text: "Лучше не ездить — покажи мастеру срочно", cls: "bg-red-100 text-red-700" },
+} as const;
+
+const CONFIDENCE_META = {
+  high: { label: "вероятно", cls: "bg-emerald-100 text-emerald-700" },
+  med: { label: "возможно", cls: "bg-amber-100 text-amber-700" },
+  low: { label: "менее вероятно", cls: "bg-bg text-muted" },
+} as const;
+
 type ServicePart = {
   name: string;
   brand?: string | null;
@@ -89,7 +117,9 @@ export default function Home() {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<AskResponse | null>(null);
+  const [diag, setDiag] = useState<DiagnoseResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const questionRef = useRef<HTMLTextAreaElement | null>(null);
 
   const [car, setCar] = useState<CarSummary | null>(null);
   const [records, setRecords] = useState<ServiceRecord[]>([]);
@@ -127,6 +157,7 @@ export default function Home() {
     setLoading(true);
     setError(null);
     setData(null);
+    setDiag(null);
     try {
       const res = await fetch("/api/ask", {
         method: "POST",
@@ -149,6 +180,7 @@ export default function Home() {
     setLoading(true);
     setError(null);
     setData(null);
+    setDiag(null);
     try {
       const res = await fetch("/api/sonar", {
         method: "POST",
@@ -171,6 +203,7 @@ export default function Home() {
     setLoading(true);
     setError(null);
     setData(null);
+    setDiag(null);
     try {
       const res = await fetch("/api/summarize", {
         method: "POST",
@@ -185,6 +218,36 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // Триаж-диагностика: причины со светофором срочности вместо текстового ответа.
+  async function diagnoseSymptom(q: string) {
+    if (q.trim().length < 5) return;
+    setLoading(true);
+    setError(null);
+    setData(null);
+    setDiag(null);
+    try {
+      const res = await fetch("/api/diagnose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symptom: q.trim() }),
+      });
+      const json = (await res.json()) as DiagnoseResponse;
+      if (!res.ok) setError(json.error ?? `HTTP ${res.status}`);
+      else setDiag(json);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Клик по уточняющему вопросу — дописываем его в симптом, владелец отвечает рядом.
+  function appendClarification(q: string) {
+    setQuestion((prev) => (prev.trim() ? prev.trim() + "\n" : "") + q + " ");
+    questionRef.current?.focus();
+    questionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   function onAskSubmit(e: React.FormEvent) {
@@ -351,6 +414,7 @@ export default function Home() {
           <form onSubmit={onAskSubmit} className="flex flex-col gap-4">
             <div className="rounded-2xl shadow-neuInset bg-bg">
               <textarea
+                ref={questionRef}
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 placeholder="Например: пора ли менять масло? цепь ГРМ? стук на холодную…"
@@ -398,6 +462,17 @@ export default function Home() {
                 <span>Спросить в интернете</span>
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={() => diagnoseSymptom(question)}
+              disabled={loading || question.trim().length < 5}
+              title="Триаж по симптому: вероятные причины, светофор срочности, что проверить самому"
+              className="rounded-2xl bg-[linear-gradient(135deg,#1e2a4f_0%,#0f1a35_100%)] px-5 py-3.5 text-sm font-semibold text-white shadow-neuSm transition hover:opacity-95 active:shadow-neuInsetSm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <span>🩺</span>
+              <span>Диагност — разобрать симптом</span>
+            </button>
           </form>
 
           <div className="mt-5">
@@ -743,34 +818,83 @@ export default function Home() {
             </div>
           )}
 
-          {data.sources.length > 0 && (
-            <div className="mt-6 border-t border-bg pt-5">
-              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
-                📚 Источники из чата ({data.sources.length})
-              </h3>
-              <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
-                {data.sources.map((s) => (
-                  <details key={s.id} className="group rounded-2xl bg-bg p-3.5 shadow-neuInsetSm cursor-pointer transition">
-                    <summary className="flex items-center justify-between gap-2 text-xs md:text-sm list-none [&::-webkit-details-marker]:hidden">
-                      <span className="flex items-center gap-2 text-ink/90 font-medium min-w-0">
-                        <span className="text-accent">📅</span>
-                        <span className="truncate">{s.start_date.slice(0, 10)}</span>
-                        <span className="text-muted">•</span>
-                        <span className="text-muted shrink-0">{s.message_count} сооб.</span>
-                      </span>
-                      <span className="flex items-center gap-2 shrink-0">
-                        {s.reactions_total > 0 && <span className="text-xs text-muted">❤ {s.reactions_total}</span>}
-                        <span className="text-muted text-xs group-open:rotate-90 transition-transform">▶</span>
-                      </span>
-                    </summary>
-                    <p className="mt-3 text-xs leading-relaxed text-ink/75 whitespace-pre-wrap">
-                      {s.text.length > 600 ? s.text.slice(0, 600) + "…" : s.text}
-                    </p>
-                  </details>
+          <SourcesFromChat sources={data.sources} />
+        </div>
+      )}
+
+      {/* Diagnosis */}
+      {diag && !loading && (
+        <div className="mt-5 md:mt-6 rounded-3xl bg-soft p-5 md:p-7 shadow-neu">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="grid h-7 w-7 place-items-center rounded-xl bg-accent text-white text-sm shadow-neuSm">
+              🩺
+            </span>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Диагност</h2>
+          </div>
+
+          <div className={`rounded-2xl px-4 py-3 text-sm font-semibold ${SEVERITY_META[diag.severity].cls}`}>
+            {SEVERITY_META[diag.severity].emoji} {SEVERITY_META[diag.severity].text}
+          </div>
+
+          {diag.uncertain && diag.questions.length > 0 && (
+            <div className="mt-4 rounded-2xl bg-bg p-4 shadow-neuInsetSm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                ❓ Данных маловато — уточни (нажми вопрос, допиши ответ и запусти Диагност снова)
+              </p>
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                {diag.questions.map((q, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => appendClarification(q)}
+                    className="rounded-full bg-soft px-3 py-1.5 text-xs text-ink shadow-neuSm transition hover:opacity-90 active:shadow-neuInsetSm text-left"
+                  >
+                    {q}
+                  </button>
                 ))}
               </div>
             </div>
           )}
+
+          {diag.causes.length > 0 && (
+            <div className="mt-4">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                Вероятные причины
+              </h3>
+              <div className="space-y-2">
+                {diag.causes.map((c, i) => (
+                  <div key={i} className="rounded-2xl bg-bg p-3.5 shadow-neuInsetSm">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="text-sm font-semibold text-ink leading-snug">
+                        {i + 1}. {c.name}
+                      </span>
+                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${CONFIDENCE_META[c.confidence].cls}`}>
+                        {CONFIDENCE_META[c.confidence].label}
+                      </span>
+                    </div>
+                    {c.why && <p className="mt-1 text-xs leading-relaxed text-ink/75">{c.why}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {diag.checks.length > 0 && (
+            <div className="mt-4 rounded-2xl bg-bg p-4 shadow-neuInsetSm">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">🔧 Проверь сам</h3>
+              <ul className="mt-2 space-y-1 text-sm text-ink/85">
+                {diag.checks.map((ch, i) => (
+                  <li key={i} className="leading-snug">• {ch}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <p className="mt-4 text-[11px] leading-snug text-muted">
+            ⚠️ Это триаж по описанию, а не вердикт мастера. Красный статус — обязательно покажи машину специалисту.
+          </p>
+
+          <SourcesFromChat sources={diag.sources} />
         </div>
       )}
 
@@ -936,6 +1060,38 @@ function EditModal({
             {saving ? "Сохраняю…" : "Сохранить"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SourcesFromChat({ sources }: { sources: Source[] }) {
+  if (sources.length === 0) return null;
+  return (
+    <div className="mt-6 border-t border-bg pt-5">
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
+        📚 Источники из чата ({sources.length})
+      </h3>
+      <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
+        {sources.map((s) => (
+          <details key={s.id} className="group rounded-2xl bg-bg p-3.5 shadow-neuInsetSm cursor-pointer transition">
+            <summary className="flex items-center justify-between gap-2 text-xs md:text-sm list-none [&::-webkit-details-marker]:hidden">
+              <span className="flex items-center gap-2 text-ink/90 font-medium min-w-0">
+                <span className="text-accent">📅</span>
+                <span className="truncate">{s.start_date.slice(0, 10)}</span>
+                <span className="text-muted">•</span>
+                <span className="text-muted shrink-0">{s.message_count} сооб.</span>
+              </span>
+              <span className="flex items-center gap-2 shrink-0">
+                {s.reactions_total > 0 && <span className="text-xs text-muted">❤ {s.reactions_total}</span>}
+                <span className="text-muted text-xs group-open:rotate-90 transition-transform">▶</span>
+              </span>
+            </summary>
+            <p className="mt-3 text-xs leading-relaxed text-ink/75 whitespace-pre-wrap">
+              {s.text.length > 600 ? s.text.slice(0, 600) + "…" : s.text}
+            </p>
+          </details>
+        ))}
       </div>
     </div>
   );
