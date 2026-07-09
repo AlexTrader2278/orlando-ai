@@ -8,7 +8,7 @@ const TOP_K_FOR_LLM = 8;
 // Умная и недорогая модель с хорошим русским и математикой.
 const ANSWER_MODEL = "deepseek/deepseek-chat";
 
-const CAR_PROFILE = `МАШИНА ВЛАДЕЛЬЦА (зафиксировано, не уточняй и не предполагай альтернатив):
+export const CAR_PROFILE = `МАШИНА ВЛАДЕЛЬЦА (зафиксировано, не уточняй и не предполагай альтернатив):
 - VIN: KL1YA755JCK767286
 - Марка/модель: Chevrolet Orlando
 - Год выпуска: 2012 (10-й символ VIN = C)

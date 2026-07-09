@@ -47,6 +47,7 @@ function curlPost(
   return new Promise((resolve, reject) => {
     const args = [
       "-sS",
+      "--ssl-no-revoke",
       "--max-time",
       String(Math.ceil(timeoutMs / 1000)),
       "--http1.1",
@@ -113,6 +114,7 @@ function curlGet(
   return new Promise((resolve, reject) => {
     const args = [
       "-sS",
+      "--ssl-no-revoke",
       "--max-time",
       String(Math.ceil(timeoutMs / 1000)),
       "--http1.1",
@@ -185,6 +187,7 @@ function curlMethod(
   return new Promise((resolve, reject) => {
     const args = [
       "-sS",
+      "--ssl-no-revoke",
       "--max-time",
       String(Math.ceil(timeoutMs / 1000)),
       "--http1.1",
