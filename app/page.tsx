@@ -33,9 +33,72 @@ type DiagnoseResponse = {
   checks: string[];
   uncertain: boolean;
   questions: string[];
+  soundDescription: string | null;
+  soundError: string | null;
   sources: Source[];
   error?: string;
 };
+
+const MAX_REC_SECONDS = 15;
+
+function encodeWavPcm16(samples: Float32Array, sampleRate: number): Blob {
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(buf);
+  const writeStr = (off: number, s: string) => {
+    for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i));
+  };
+  writeStr(0, "RIFF");
+  v.setUint32(4, 36 + samples.length * 2, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true);
+  v.setUint32(24, sampleRate, true);
+  v.setUint32(28, sampleRate * 2, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  writeStr(36, "data");
+  v.setUint32(40, samples.length * 2, true);
+  let off = 44;
+  for (let i = 0; i < samples.length; i++, off += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return new Blob([buf], { type: "audio/wav" });
+}
+
+/* Любой формат MediaRecorder (webm/opus, mp4/aac) → WAV 16 кГц моно.
+   Свой браузер всегда умеет декодировать то, что сам записал,
+   а WAV гарантированно принимает аудио-модель. */
+async function blobToWav16k(blob: Blob): Promise<Blob> {
+  const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  const ac = new AC();
+  let decoded: AudioBuffer;
+  try {
+    decoded = await ac.decodeAudioData(await blob.arrayBuffer());
+  } finally {
+    void ac.close();
+  }
+  const rate = 16000;
+  const frames = Math.max(1, Math.round(decoded.duration * rate));
+  const oac = new OfflineAudioContext(1, frames, rate);
+  const src = oac.createBufferSource();
+  src.buffer = decoded;
+  src.connect(oac.destination);
+  src.start();
+  const rendered = await oac.startRendering();
+  return encodeWavPcm16(rendered.getChannelData(0), rate);
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
+    r.onerror = () => reject(new Error("не удалось прочитать аудио"));
+    r.readAsDataURL(blob);
+  });
+}
 
 const SEVERITY_META = {
   ok: { emoji: "🟢", text: "Можно ездить и наблюдать", cls: "bg-emerald-100 text-emerald-800" },
@@ -120,6 +183,14 @@ export default function Home() {
   const [diag, setDiag] = useState<DiagnoseResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const questionRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const [recState, setRecState] = useState<"idle" | "recording" | "converting">("idle");
+  const [recSeconds, setRecSeconds] = useState(0);
+  const [audioWav, setAudioWav] = useState<Blob | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [car, setCar] = useState<CarSummary | null>(null);
   const [records, setRecords] = useState<ServiceRecord[]>([]);
@@ -220,18 +291,75 @@ export default function Home() {
     }
   }
 
+  function stopRecording() {
+    const mr = mediaRecorderRef.current;
+    if (mr && mr.state !== "inactive") mr.stop();
+    if (recTimerRef.current) {
+      clearInterval(recTimerRef.current);
+      recTimerRef.current = null;
+    }
+  }
+
+  async function startRecording() {
+    setError(null);
+    discardAudio();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      chunksRef.current = [];
+      const mr = new MediaRecorder(stream);
+      mediaRecorderRef.current = mr;
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setRecState("converting");
+        try {
+          const raw = new Blob(chunksRef.current, { type: mr.mimeType || "audio/webm" });
+          const wav = await blobToWav16k(raw);
+          setAudioWav(wav);
+          setAudioUrl(URL.createObjectURL(wav));
+        } catch (e) {
+          setError(`Не удалось обработать запись: ${(e as Error).message}`);
+        } finally {
+          setRecState("idle");
+        }
+      };
+      mr.start();
+      setRecSeconds(0);
+      setRecState("recording");
+      recTimerRef.current = setInterval(() => {
+        setRecSeconds((s) => {
+          if (s + 1 >= MAX_REC_SECONDS) stopRecording();
+          return s + 1;
+        });
+      }, 1000);
+    } catch (e) {
+      setError(`Микрофон недоступен: ${(e as Error).message}`);
+    }
+  }
+
+  function discardAudio() {
+    setAudioWav(null);
+    setAudioUrl((old) => {
+      if (old) URL.revokeObjectURL(old);
+      return null;
+    });
+  }
+
   // Триаж-диагностика: причины со светофором срочности вместо текстового ответа.
   async function diagnoseSymptom(q: string) {
-    if (q.trim().length < 5) return;
+    if (q.trim().length < 5 && !audioWav) return;
     setLoading(true);
     setError(null);
     setData(null);
     setDiag(null);
     try {
+      const audio = audioWav ? { data: await blobToBase64(audioWav), format: "wav" } : undefined;
       const res = await fetch("/api/diagnose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symptom: q.trim() }),
+        body: JSON.stringify({ symptom: q.trim(), audio }),
       });
       const json = (await res.json()) as DiagnoseResponse;
       if (!res.ok) setError(json.error ?? `HTTP ${res.status}`);
@@ -463,15 +591,57 @@ export default function Home() {
               </button>
             </div>
 
+            <div className="flex flex-col gap-2 rounded-2xl bg-bg p-3 shadow-neuInsetSm">
+              <div className="flex items-center gap-2">
+                {recState !== "recording" && !audioUrl && (
+                  <button
+                    type="button"
+                    onClick={startRecording}
+                    disabled={loading || recState === "converting"}
+                    className="flex-1 rounded-2xl bg-soft px-4 py-2.5 text-xs md:text-sm font-medium text-ink shadow-neuSm transition active:shadow-neuInsetSm disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <span>🎤</span>
+                    <span>{recState === "converting" ? "Обрабатываю запись…" : `Записать звук для Диагноста (до ${MAX_REC_SECONDS} сек)`}</span>
+                  </button>
+                )}
+                {recState === "recording" && (
+                  <button
+                    type="button"
+                    onClick={stopRecording}
+                    className="flex-1 rounded-2xl bg-red-100 px-4 py-2.5 text-xs md:text-sm font-semibold text-red-700 shadow-neuSm transition active:shadow-neuInsetSm flex items-center justify-center gap-2"
+                  >
+                    <span className="h-2.5 w-2.5 rounded-full bg-red-600 animate-pulse" />
+                    <span>Идёт запись · {recSeconds} сек — нажми, чтобы остановить</span>
+                  </button>
+                )}
+                {audioUrl && recState === "idle" && (
+                  <>
+                    <audio controls src={audioUrl} className="h-9 min-w-0 flex-1" />
+                    <button
+                      type="button"
+                      onClick={discardAudio}
+                      title="Удалить запись"
+                      className="shrink-0 rounded-xl bg-soft px-3 py-2 text-sm shadow-neuSm active:shadow-neuInsetSm"
+                    >
+                      🗑
+                    </button>
+                  </>
+                )}
+              </div>
+              <p className="text-[10px] leading-snug text-muted">
+                Поднеси телефон к источнику звука (капот, колесо). Запись уйдёт вместе с описанием при нажатии «Диагност».
+              </p>
+            </div>
+
             <button
               type="button"
               onClick={() => diagnoseSymptom(question)}
-              disabled={loading || question.trim().length < 5}
-              title="Триаж по симптому: вероятные причины, светофор срочности, что проверить самому"
+              disabled={loading || (question.trim().length < 5 && !audioWav)}
+              title="Триаж по симптому и звуку: вероятные причины, светофор срочности, что проверить самому"
               className="rounded-2xl bg-[linear-gradient(135deg,#1e2a4f_0%,#0f1a35_100%)] px-5 py-3.5 text-sm font-semibold text-white shadow-neuSm transition hover:opacity-95 active:shadow-neuInsetSm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               <span>🩺</span>
-              <span>Диагност — разобрать симптом</span>
+              <span>Диагност — разобрать {audioWav ? "симптом + звук" : "симптом"}</span>
             </button>
           </form>
 
@@ -835,6 +1005,18 @@ export default function Home() {
           <div className={`rounded-2xl px-4 py-3 text-sm font-semibold ${SEVERITY_META[diag.severity].cls}`}>
             {SEVERITY_META[diag.severity].emoji} {SEVERITY_META[diag.severity].text}
           </div>
+
+          {diag.soundDescription && (
+            <div className="mt-4 rounded-2xl bg-bg p-4 shadow-neuInsetSm">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">🔊 Что услышал AI</h3>
+              <p className="mt-1.5 text-xs leading-relaxed text-ink/80">{diag.soundDescription}</p>
+            </div>
+          )}
+          {diag.soundError && (
+            <div className="mt-4 rounded-xl bg-amber-100 px-3 py-2 text-[11px] font-medium text-amber-800">
+              ⚠️ {diag.soundError}
+            </div>
+          )}
 
           {diag.uncertain && diag.questions.length > 0 && (
             <div className="mt-4 rounded-2xl bg-bg p-4 shadow-neuInsetSm">

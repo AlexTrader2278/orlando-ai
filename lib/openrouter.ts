@@ -2,9 +2,13 @@ import { httpPost } from "./http";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "input_audio"; input_audio: { data: string; format: string } };
+
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | ContentPart[];
 };
 
 type Choice = {
