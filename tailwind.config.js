@@ -4,21 +4,21 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        bg: "#eef0f4",
-        ink: "#1c2436",
+        bg: "#e4e8f0",
+        ink: "#131a2b",
         soft: "#ffffff",
-        muted: "#6b7488",
-        accent: "#2563eb",
+        muted: "#485470",
+        accent: "#1d4ed8",
         accentInk: "#1e3a8a",
       },
       boxShadow: {
         // Выпуклые элементы (карточки, выпуклые кнопки): тёмная тень сильнее, blur больше
-        neu: "10px 10px 28px #b0b6c6, -10px -10px 28px #ffffff",
-        neuSm: "5px 5px 14px #aab0c0, -5px -5px 14px #ffffff",
+        neu: "12px 12px 30px #96a0b8, -12px -12px 30px #ffffff",
+        neuSm: "6px 6px 14px #949eb6, -6px -6px 14px #ffffff",
         // Утопленные элементы (textarea, input, превью): тёмная тень глубже + spread,
         // светлая тень светлее для контраста — теперь visibly «продавлено»
-        neuInset: "inset 7px 7px 16px #9aa3b5, inset -7px -7px 16px #ffffff",
-        neuInsetSm: "inset 5px 5px 11px #9aa3b5, inset -5px -5px 11px #ffffff",
+        neuInset: "inset 7px 7px 16px #8590aa, inset -7px -7px 16px #ffffff",
+        neuInsetSm: "inset 5px 5px 11px #8590aa, inset -5px -5px 11px #ffffff",
       },
     },
   },
