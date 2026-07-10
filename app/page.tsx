@@ -255,29 +255,6 @@ export default function Home() {
     }
   }
 
-  // Поиск в интернете через Perplexity Sonar (актуальные цены, регламенты, форумы).
-  async function askInternet(q: string) {
-    if (q.trim().length < 2) return;
-    setLoading(true);
-    setError(null);
-    setData(null);
-    setDiag(null);
-    try {
-      const res = await fetch("/api/sonar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q.trim() }),
-      });
-      const json = (await res.json()) as AskResponse;
-      if (!res.ok) setError(json.error ?? `HTTP ${res.status}`);
-      else setData(json);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   // Сводка ТОЛЬКО по чату сообщества (без истории моей машины).
   async function summarizeFindings(q: string) {
     if (q.trim().length < 2) return;
@@ -588,16 +565,6 @@ export default function Home() {
               >
                 <span>📝</span>
                 <span>Суммировать находки</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => askInternet(question)}
-                disabled={loading || question.trim().length < 5}
-                title="Поиск в интернете через Perplexity Sonar (актуальные цены, регламенты, форумы)"
-                className="flex-1 rounded-2xl bg-bg px-5 py-3.5 text-sm font-semibold text-ink shadow-neuSm transition hover:opacity-95 active:shadow-neuInsetSm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                <span>🌐</span>
-                <span>Спросить в интернете</span>
               </button>
             </div>
 
