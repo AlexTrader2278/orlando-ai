@@ -94,6 +94,34 @@ export async function httpPost(
     : fetchPost(url, body, headers, timeoutMs);
 }
 
+/** Скачивание бинарного файла (голосовое из Telegram). Обычный httpGet читает ответ как текст и портит байты. */
+export async function httpGetBinary(url: string, timeoutMs = 30_000): Promise<Buffer> {
+  if (!shouldUseCurl()) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { signal: controller.signal, cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return Buffer.from(await res.arrayBuffer());
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const args = ["-sS", "-f", "--ssl-no-revoke", "--max-time", String(Math.ceil(timeoutMs / 1000)), "--http1.1", url];
+    const proc = spawn("curl", args, { windowsHide: true });
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    proc.stdout.on("data", (c) => out.push(c));
+    proc.stderr.on("data", (c) => err.push(c));
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code !== 0) return reject(new Error(`curl ${code}: ${Buffer.concat(err).toString("utf-8").trim().slice(0, 200)}`));
+      resolve(Buffer.concat(out));
+    });
+  });
+}
+
 function fetchGet(
   url: string,
   headers: Record<string, string>,

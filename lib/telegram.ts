@@ -1,4 +1,4 @@
-import { httpPost } from "./http";
+import { httpPost, httpGetBinary } from "./http";
 
 const API = "https://api.telegram.org";
 // Лимит Telegram — 4096 символов; берём с запасом.
@@ -25,6 +25,18 @@ export async function tg<T = unknown>(method: string, body: Record<string, unkno
   }
   if (!json.ok) throw new Error(`Telegram ${method}: ${json.description ?? res.status}`);
   return json.result as T;
+}
+
+/** Скачать файл, присланный боту (голосовое, аудио): getFile → прямая ссылка → байты. */
+export async function downloadFile(fileId: string): Promise<Buffer> {
+  const f = await tg<{ file_path?: string }>("getFile", { file_id: fileId });
+  if (!f.file_path) throw new Error("Telegram не отдал путь к файлу");
+  return httpGetBinary(`${API}/file/bot${botToken()}/${f.file_path}`, 30_000);
+}
+
+/** Отправить файл по публичной ссылке — Telegram скачает его сам (до 20 МБ). */
+export async function sendDocument(chatId: number, documentUrl: string, caption?: string): Promise<void> {
+  await tg("sendDocument", { chat_id: chatId, document: documentUrl, ...(caption ? { caption } : {}) });
 }
 
 export function splitText(text: string, limit = TG_LIMIT): string[] {
@@ -78,7 +90,7 @@ export async function setMarkup(chatId: number, messageId: number, markup: Reply
 
 /* ── Меню-гармошка: свёрнуто = одна кнопка, развёрнуто = блок действий ── */
 
-export type MenuAction = "ask" | "diagnose" | "log" | "search" | "summarize" | "car" | "records";
+export type MenuAction = "ask" | "diagnose" | "log" | "search" | "summarize" | "car" | "records" | "export";
 
 const MENU_ITEMS: { action: MenuAction; label: string }[] = [
   { action: "ask", label: "💬 Спросить" },
@@ -88,6 +100,7 @@ const MENU_ITEMS: { action: MenuAction; label: string }[] = [
   { action: "summarize", label: "📝 Суммировать" },
   { action: "car", label: "🛠 Моя машина" },
   { action: "records", label: "📋 Записи" },
+  { action: "export", label: "⬇️ Выгрузка" },
 ];
 
 export const ACTION_NAMES: ReadonlySet<string> = new Set(MENU_ITEMS.map((i) => i.action));

@@ -16,6 +16,8 @@ import { embed } from "./mistral";
 import { rpcSearchThreads } from "./supabase-rest";
 import {
   sendMessage,
+  sendDocument,
+  downloadFile,
   sendTyping,
   answerCallback,
   setMarkup,
@@ -31,11 +33,14 @@ import { sendRich, plainOf, esc, llmMd, quote, cell } from "./tgrich";
 
 type RichBits = { text?: string; rich_message?: { blocks?: unknown[] } };
 type TgUser = { id: number };
+type TgMedia = { file_id: string; duration?: number; file_size?: number; mime_type?: string };
 type TgMessage = RichBits & {
   message_id: number;
   chat: { id: number; type: string };
   from?: TgUser;
   reply_to_message?: RichBits;
+  voice?: TgMedia;
+  audio?: TgMedia;
 };
 type TgCallback = {
   id: string;
@@ -48,6 +53,8 @@ export type TgUpdate = { update_id: number; message?: TgMessage; callback_query?
 const MAX_QUESTION = 1000;
 const MAX_SUMMARY_QUERY = 300;
 const LIST_LIMIT = 8;
+const MAX_VOICE_SECONDS = 60;
+const MAX_VOICE_BYTES = 2_000_000;
 
 /* Режим диалога без базы: подсказка бота уходит с force_reply, а по ПЕРВОЙ строке сообщения, на которое
    ответил владелец, узнаём, что он хочет. Заголовок = часть строки до «·» без эмодзи и знаков, сравнивается
@@ -216,6 +223,8 @@ function mdDiagnosis(symptom: string, d: DiagnoseResult): string {
   // Первая строка — «эхо» симптома: по ней при ответе на это сообщение восстанавливаем исходное описание.
   parts.push(`## 🩺 Диагност · «${esc(symptom)}»`);
   parts.push(`**${SEVERITY[d.severity]}**`);
+  if (d.soundDescription) parts.push(`### 🔊 Что услышал AI\n${esc(d.soundDescription)}`);
+  if (d.soundError) parts.push(`> ⚠️ ${esc(d.soundError)}`);
   if (d.uncertain && d.questions.length > 0) {
     parts.push(`### ❓ Данных маловато\nОтветь на это сообщение, дополнив описание:\n${d.questions.map((q) => `- ${esc(q)}`).join("\n")}`);
   }
@@ -326,6 +335,53 @@ async function runDiagnose(chatId: number, rawSymptom: string): Promise<void> {
   await sendRich(chatId, mdDiagnosis(symptom, d), menuCollapsed());
 }
 
+function audioFormat(media: TgMedia, isVoice: boolean): string {
+  if (isVoice) return "ogg"; // голосовые Telegram — всегда OGG/Opus; модель принимает без конвертации
+  const mt = (media.mime_type ?? "").toLowerCase();
+  if (mt.includes("wav")) return "wav";
+  if (mt.includes("ogg") || mt.includes("opus")) return "ogg";
+  if (mt.includes("mp4") || mt.includes("m4a") || mt.includes("aac")) return "m4a";
+  return "mp3";
+}
+
+/** Голосовое/аудио в чат = диагностика по звуку. Если ответили на результат диагноза — описание дополняется. */
+async function runVoice(chatId: number, m: TgMessage): Promise<void> {
+  const media = m.voice ?? m.audio;
+  if (!media) return;
+  if ((media.duration ?? 0) > MAX_VOICE_SECONDS || (media.file_size ?? 0) > MAX_VOICE_BYTES) {
+    await sendMessage(chatId, "Запись слишком длинная. Запиши покороче: 10–15 секунд у источника звука достаточно.", menuCollapsed());
+    return;
+  }
+  const firstLine = plainOf(m.reply_to_message).split("\n")[0] ?? "";
+  const prior = headingOf(firstLine) === HEAD_DIAGNOSE ? (firstLine.match(ECHO_RE)?.[1] ?? "") : "";
+
+  await sendTyping(chatId);
+  const buf = await downloadFile(media.file_id);
+  if (buf.length > MAX_VOICE_BYTES) {
+    await sendMessage(chatId, "Файл слишком большой. Запиши покороче: 10–15 секунд достаточно.", menuCollapsed());
+    return;
+  }
+  const d = await diagnose(prior, { data: buf.toString("base64"), format: audioFormat(media, Boolean(m.voice)) });
+  const heard = d.soundDescription ? `🎤 ${cleanText(d.soundDescription).slice(0, 250)}` : "🎤 звук";
+  await sendRich(chatId, mdDiagnosis([prior, heard].filter(Boolean).join(" + "), d), menuCollapsed());
+}
+
+async function runExport(chatId: number): Promise<void> {
+  const base = (process.env.PUBLIC_URL ?? "https://orlando-ai.vercel.app").replace(/\/$/, "");
+  try {
+    await sendDocument(chatId, `${base}/api/export?format=csv`, "📊 Книжка для Excel (CSV)");
+    await sendDocument(chatId, `${base}/api/export?format=json`, "💾 Полный бэкап (JSON)");
+    await sendMessage(chatId, "Готово ✓ Два файла выше.", menuCollapsed());
+  } catch (e) {
+    console.error("bot export:", (e as Error).message);
+    await sendMessage(
+      chatId,
+      `Не получилось прислать файлы. Скачай по ссылкам:\n${base}/api/export?format=csv\n${base}/api/export?format=json`,
+      menuCollapsed()
+    );
+  }
+}
+
 async function runLogPreview(chatId: number, text: string): Promise<void> {
   if (text.length < 5) {
     await sendMessage(chatId, "Слишком коротко — опиши, что сделали, пробег и сумму.", menuCollapsed());
@@ -392,6 +448,9 @@ async function runAction(chatId: number, action: MenuAction): Promise<void> {
         "✍️ Записать работу\nОпиши по-русски: что сделали, пробег, сумму. Ответь на это сообщение — сначала покажу, что понял, в базу пишу только после «✓ Сохранить».",
         "Например: поменял масло 5w30 4л, пробег 198500, 3200 р"
       );
+    case "export":
+      await sendTyping(chatId);
+      return runExport(chatId);
     case "car":
       await sendTyping(chatId);
       await sendRich(chatId, mdCar(await getServiceRecords(50)), menuCollapsed());
@@ -539,9 +598,10 @@ async function handleCallback(cb: TgCallback): Promise<void> {
 }
 
 async function handleMessage(m: TgMessage): Promise<void> {
-  if (m.chat.type !== "private" || !m.text) return;
+  const hasAudio = Boolean(m.voice ?? m.audio);
+  if (m.chat.type !== "private" || (!m.text && !hasAudio)) return;
   const chatId = m.chat.id;
-  const text = m.text.trim();
+  const text = (m.text ?? "").trim();
 
   if (!process.env.TELEGRAM_OWNER_ID?.trim()) {
     if (text.startsWith("/start")) {
@@ -555,8 +615,21 @@ async function handleMessage(m: TgMessage): Promise<void> {
   }
 
   if (text.startsWith("/start") || text.startsWith("/menu")) {
-    await sendMessage(chatId, "🚗 Орландо-Механик\nВыбери действие или просто напиши вопрос — отвечу как в «Спросить».", menuExpanded());
+    await sendMessage(
+      chatId,
+      "🚗 Орландо-Механик\nВыбери действие или просто напиши вопрос — отвечу как в «Спросить».\n🎤 Пришли голосовое со звуком мотора — разберу его в «Диагносте».",
+      menuExpanded()
+    );
     return;
+  }
+
+  if (hasAudio) {
+    try {
+      return await runVoice(chatId, m);
+    } catch (e) {
+      await reportError(chatId, e);
+      return;
+    }
   }
 
   try {
