@@ -10,6 +10,8 @@
     "threads": "tsx scripts/threads.ts",
     "stats": "tsx scripts/stats.ts",
     "smoke": "tsx --env-file=.env.local scripts/smoke.ts",
+    "tg-setup": "tsx --env-file=.env.local scripts/tg-setup.ts",
+    "tg-poll": "tsx --env-file=.env.local scripts/tg-poll.ts",
     "index": "tsx --env-file=.env.local scripts/index.ts",
     "search": "tsx --env-file=.env.local scripts/search.ts",
     "seed-car": "tsx --env-file=.env.local scripts/seed-car.ts",

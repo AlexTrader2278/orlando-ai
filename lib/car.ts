@@ -40,6 +40,19 @@ export async function getServiceRecords(limit = 50): Promise<ServiceRecord[]> {
   return JSON.parse(res.body);
 }
 
+export async function getServiceRecord(id: string): Promise<ServiceRecord | null> {
+  const res = await httpGet(
+    sbUrl(`/rest/v1/service_records?select=*&id=eq.${encodeURIComponent(id)}&limit=1`),
+    sbAuth(),
+    15_000
+  );
+  if (res.status >= 400) {
+    throw new Error(`Supabase get service_record ${res.status}: ${res.body.slice(0, 300)}`);
+  }
+  const arr = JSON.parse(res.body) as ServiceRecord[];
+  return arr[0] ?? null;
+}
+
 export async function insertServiceRecord(rec: Partial<ServiceRecord>): Promise<ServiceRecord> {
   const res = await httpPost(
     sbUrl(`/rest/v1/service_records`),

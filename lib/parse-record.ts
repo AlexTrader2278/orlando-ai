@@ -60,8 +60,33 @@ export async function parseFreeText(text: string, today: string): Promise<Parsed
     { model: "openai/gpt-4o-mini", temperature: 0.1, maxTokens: 1200 }
   );
 
-  const parsed = JSON.parse(extractJson(content)) as Partial<ParsedRecord>;
+  return normalizeParsed(JSON.parse(extractJson(content)) as Partial<ParsedRecord>, today);
+}
 
+const EDIT_SYSTEM = `${SYSTEM}
+
+РЕЖИМ ПРАВКИ (важнее всего выше): тебе дают ТЕКУЩУЮ запись (JSON) и правку владельца словами. Верни ПОЛНУЮ обновлённую запись в том же JSON-формате.
+- Меняй только то, что упомянуто в правке; всё остальное оставь дословно как в текущей записи.
+- Правка может заменять («пробег не 198500, а 199000»), добавлять («добавь: заменил свечи 4 шт») или удалять («убери масляный фильтр»).
+- Если дата в правке не названа — оставь прежнюю дату, не подставляй сегодняшнюю.
+- При добавлении работ/деталей обнови и materials по тем же правилам.`;
+
+/** Правка существующей записи словами владельца → полная обновлённая запись (в БД не пишет). */
+export async function applyEdit(existing: ParsedRecord, instruction: string, today: string): Promise<ParsedRecord> {
+  const { content } = await chat(
+    [
+      { role: "system", content: EDIT_SYSTEM },
+      {
+        role: "user",
+        content: `Сегодня: ${today}\n\nТЕКУЩАЯ ЗАПИСЬ:\n${JSON.stringify(existing)}\n\nПРАВКА ВЛАДЕЛЬЦА:\n${instruction}`,
+      },
+    ],
+    { model: "openai/gpt-4o-mini", temperature: 0.1, maxTokens: 1200 }
+  );
+  return normalizeParsed(JSON.parse(extractJson(content)) as Partial<ParsedRecord>, existing.date);
+}
+
+function normalizeParsed(parsed: Partial<ParsedRecord>, today: string): ParsedRecord {
   const parts: ServicePart[] = Array.isArray(parsed.parts)
     ? parsed.parts
         .filter((p): p is ServicePart => Boolean(p && typeof p === "object" && (p as ServicePart).name))
