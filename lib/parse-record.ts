@@ -49,18 +49,29 @@ const SYSTEM = `Ты — парсер записей об обслуживани
 
 Возвращай ТОЛЬКО JSON, без markdown-блоков, без комментариев, без префикса.`;
 
+/** Запрос к нейросети с разбором JSON и одним повтором: модель изредка отдаёт битый ответ или временно не отвечает. */
+async function chatJson(system: string, user: string): Promise<Partial<ParsedRecord>> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { content } = await chat(
+        [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        { model: "openai/gpt-4o-mini", temperature: 0.1, maxTokens: 1200 }
+      );
+      return JSON.parse(extractJson(content)) as Partial<ParsedRecord>;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
+
 export async function parseFreeText(text: string, today: string): Promise<ParsedRecord> {
-  const userPrompt = `Сегодня: ${today}\n\nСообщение владельца:\n${text}`;
-
-  const { content } = await chat(
-    [
-      { role: "system", content: SYSTEM },
-      { role: "user", content: userPrompt },
-    ],
-    { model: "openai/gpt-4o-mini", temperature: 0.1, maxTokens: 1200 }
-  );
-
-  return normalizeParsed(JSON.parse(extractJson(content)) as Partial<ParsedRecord>, today);
+  const parsed = await chatJson(SYSTEM, `Сегодня: ${today}\n\nСообщение владельца:\n${text}`);
+  return normalizeParsed(parsed, today);
 }
 
 const EDIT_SYSTEM = `${SYSTEM}
@@ -73,17 +84,11 @@ const EDIT_SYSTEM = `${SYSTEM}
 
 /** Правка существующей записи словами владельца → полная обновлённая запись (в БД не пишет). */
 export async function applyEdit(existing: ParsedRecord, instruction: string, today: string): Promise<ParsedRecord> {
-  const { content } = await chat(
-    [
-      { role: "system", content: EDIT_SYSTEM },
-      {
-        role: "user",
-        content: `Сегодня: ${today}\n\nТЕКУЩАЯ ЗАПИСЬ:\n${JSON.stringify(existing)}\n\nПРАВКА ВЛАДЕЛЬЦА:\n${instruction}`,
-      },
-    ],
-    { model: "openai/gpt-4o-mini", temperature: 0.1, maxTokens: 1200 }
+  const parsed = await chatJson(
+    EDIT_SYSTEM,
+    `Сегодня: ${today}\n\nТЕКУЩАЯ ЗАПИСЬ:\n${JSON.stringify(existing)}\n\nПРАВКА ВЛАДЕЛЬЦА:\n${instruction}`
   );
-  return normalizeParsed(JSON.parse(extractJson(content)) as Partial<ParsedRecord>, existing.date);
+  return normalizeParsed(parsed, existing.date);
 }
 
 function normalizeParsed(parsed: Partial<ParsedRecord>, today: string): ParsedRecord {

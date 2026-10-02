@@ -20,6 +20,23 @@ async function main() {
     ],
   });
 
+  await tg("setMyShortDescription", {
+    short_description: "Личный AI-механик Chevrolet Orlando: ответы по опыту владельцев, диагностика, сервисная книжка.",
+  });
+  await tg("setMyDescription", {
+    description: [
+      "Личный механик для Chevrolet Orlando 1.8 (F18D4, АКПП 6T40).",
+      "",
+      "• Отвечает по опыту владельцев — 65 000 обсуждений из чата сообщества",
+      "• Помнит твою машину: что и когда менял, на каком пробеге",
+      "• Разбирает симптом: вероятные причины, светофор срочности, что проверить самому",
+      "• Слушает звук мотора — пришли голосовое",
+      "• Ведёт сервисную книжку: запись, правка, выгрузка",
+      "",
+      "Это помощник-триаж, а не вердикт мастера.",
+    ].join("\n"),
+  });
+
   const info = await tg<{ url: string; pending_update_count: number; last_error_message?: string }>("getWebhookInfo");
   console.log("webhook:", info.url);
   console.log("в очереди:", info.pending_update_count, "| последняя ошибка:", info.last_error_message ?? "нет");
