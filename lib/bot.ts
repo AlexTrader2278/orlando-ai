@@ -14,6 +14,7 @@ import { parseFreeText, applyEdit, validateParsedRecord, type ParsedRecord } fro
 import { savePending, takePending, UUID_RE } from "./bot-pending";
 import { embed } from "./mistral";
 import { rpcSearchThreads } from "./supabase-rest";
+import { transcribeVoice } from "./voice";
 import {
   sendMessage,
   sendDocument,
@@ -60,6 +61,7 @@ const MAX_VOICE_BYTES = 2_000_000;
    ответил владелец, узнаём, что он хочет. Заголовок = часть строки до «·» без эмодзи и знаков, сравнивается
    ТОЧНО: обычный ответ AI, начинающийся словом «Диагностика…», режимом не считается.
    Всё после «·» — полезная нагрузка (эхо симптома или запроса). */
+const HEAD_ASK = "Спросить";
 const HEAD_SEARCH = "Поиск по чату";
 const HEAD_SUMMARIZE = "Суммировать";
 const HEAD_DIAGNOSE = "Диагност";
@@ -344,26 +346,104 @@ function audioFormat(media: TgMedia, isVoice: boolean): string {
   return "mp3";
 }
 
-/** Голосовое/аудио в чат = диагностика по звуку. Если ответили на результат диагноза — описание дополняется. */
+/** Текст (написанный или расшифрованный из голоса) → нужный сценарий по тому, на какое сообщение бота ответил владелец. */
+async function routeText(chatId: number, text: string, replied: string): Promise<void> {
+  const firstLine = replied.split("\n")[0] ?? "";
+  const head = headingOf(firstLine);
+
+  if (head === HEAD_SEARCH) return await runSearch(chatId, text);
+
+  if (head === HEAD_SUMMARIZE) return await runSummarize(chatId, text);
+
+  if (head === HEAD_DIAGNOSE) {
+    // Ответ на результат диагноза: исходный симптом лежит в эхо первой строки «🩺 Диагност · «…»».
+    const echo = firstLine.match(ECHO_RE)?.[1] ?? "";
+    return await runDiagnose(chatId, echo ? `${echo} ${text}` : text);
+  }
+
+  if (head === HEAD_EDIT) {
+    const id = replied.match(/id:\s*([0-9a-f-]{36})/i)?.[1] ?? "";
+    return await runEditPreview(chatId, id, text);
+  }
+
+  if (HEAD_PREVIEWS.has(head)) {
+    await sendMessage(
+      chatId,
+      "Под превью нажми «✓ Сохранить» или «✗ Отмена». Чтобы переписать — отмени и пришли запись заново через меню.",
+      menuCollapsed()
+    );
+    return;
+  }
+
+  if (head === HEAD_LOG) return await runLogPreview(chatId, text);
+
+  // «Спросить», обычное сообщение и ответ на любое другое сообщение бота — вопрос к AI.
+  return await runAsk(chatId, text);
+}
+
+/** Диагностика по голосу: речь (если есть) = описание симптома, запись уходит на разбор звука, только если звук на ней есть. */
+async function runDiagnoseVoice(chatId: number, rawSymptom: string, audio?: { data: string; format: string }): Promise<void> {
+  let symptom = cleanText(rawSymptom);
+  if (symptom.length > MAX_SYMPTOM_CHARS) symptom = symptom.slice(-MAX_SYMPTOM_CHARS);
+  if (symptom.length < 5 && !audio) {
+    await sendMessage(chatId, "Слишком коротко — опиши, что слышно/чувствуется, где и когда.", menuCollapsed());
+    return;
+  }
+  await sendTyping(chatId);
+  const d = await diagnose(symptom, audio);
+  const sound = d.soundDescription ? `🎤 ${cleanText(d.soundDescription).slice(0, 250)}` : "";
+  const echo = [symptom, sound].filter(Boolean).join(" + ") || "🎤 звук";
+  await sendRich(chatId, mdDiagnosis(echo, d), menuCollapsed());
+}
+
+/** Голосовое: СНАЧАЛА расшифровываем речь, и только потом решаем, что с ней делать — по сообщению, на которое ответил владелец.
+    Раньше любое голосовое шло в диагностику звука, и вопрос голосом превращался в «слышу человеческую речь». */
 async function runVoice(chatId: number, m: TgMessage): Promise<void> {
   const media = m.voice ?? m.audio;
   if (!media) return;
   if ((media.duration ?? 0) > MAX_VOICE_SECONDS || (media.file_size ?? 0) > MAX_VOICE_BYTES) {
-    await sendMessage(chatId, "Запись слишком длинная. Запиши покороче: 10–15 секунд у источника звука достаточно.", menuCollapsed());
+    await sendMessage(chatId, "Запись слишком длинная. Запиши покороче: до минуты, для звука мотора хватит 10–15 секунд.", menuCollapsed());
     return;
   }
-  const firstLine = plainOf(m.reply_to_message).split("\n")[0] ?? "";
-  const prior = headingOf(firstLine) === HEAD_DIAGNOSE ? (firstLine.match(ECHO_RE)?.[1] ?? "") : "";
+  const replied = plainOf(m.reply_to_message);
+  const firstLine = replied.split("\n")[0] ?? "";
+  const head = headingOf(firstLine);
 
   await sendTyping(chatId);
   const buf = await downloadFile(media.file_id);
   if (buf.length > MAX_VOICE_BYTES) {
-    await sendMessage(chatId, "Файл слишком большой. Запиши покороче: 10–15 секунд достаточно.", menuCollapsed());
+    await sendMessage(chatId, "Файл слишком большой. Запиши покороче: до минуты.", menuCollapsed());
     return;
   }
-  const d = await diagnose(prior, { data: buf.toString("base64"), format: audioFormat(media, Boolean(m.voice)) });
-  const heard = d.soundDescription ? `🎤 ${cleanText(d.soundDescription).slice(0, 250)}` : "🎤 звук";
-  await sendRich(chatId, mdDiagnosis([prior, heard].filter(Boolean).join(" + "), d), menuCollapsed());
+  const audio = { data: buf.toString("base64"), format: audioFormat(media, Boolean(m.voice)) };
+  const heard = await transcribeVoice(audio);
+  const speech = cleanText(heard.speech).slice(0, MAX_QUESTION);
+  const words = speech.split(" ").filter(Boolean).length;
+  console.log(`bot voice: режим="${head || "нет"}" слов=${words} звук_машины=${heard.mechanical}`);
+
+  // Диагностика: речь = описание симптома; сам звук разбираем, только если он на записи есть (или речи нет совсем).
+  if (head === HEAD_DIAGNOSE) {
+    const prior = firstLine.match(ECHO_RE)?.[1] ?? "";
+    if (speech) await sendMessage(chatId, `🎤 Услышал: «${speech}»`);
+    return await runDiagnoseVoice(chatId, [prior, speech].filter(Boolean).join(" "), heard.mechanical || !speech ? audio : undefined);
+  }
+
+  const knownMode = head === HEAD_ASK || head === HEAD_SEARCH || head === HEAD_SUMMARIZE || head === HEAD_LOG || head === HEAD_EDIT || HEAD_PREVIEWS.has(head);
+
+  // Запись без слов, но со звуком машины, и без выбранной кнопки — это запись звука для диагностики (как и было раньше).
+  if (!knownMode && heard.mechanical && words < 3) {
+    return await runDiagnoseVoice(chatId, speech, audio);
+  }
+  if (!speech) {
+    await sendMessage(chatId, "Не расслышал речь. Запиши ещё раз поближе к микрофону или напиши текстом.", menuCollapsed());
+    return;
+  }
+
+  await sendMessage(chatId, `🎤 Услышал: «${speech}»`);
+  if (!knownMode && heard.mechanical) {
+    await sendMessage(chatId, "🔧 На записи слышен ещё и звук машины. Чтобы разобрать звук, нажми «🩺 Диагност» и пришли запись ответом.");
+  }
+  return await routeText(chatId, speech, replied);
 }
 
 async function runExport(chatId: number): Promise<void> {
@@ -617,7 +697,7 @@ async function handleMessage(m: TgMessage): Promise<void> {
   if (text.startsWith("/start") || text.startsWith("/menu")) {
     await sendMessage(
       chatId,
-      "🚗 Орландо-Механик\nВыбери действие или просто напиши вопрос — отвечу как в «Спросить».\n🎤 Пришли голосовое со звуком мотора — разберу его в «Диагносте».",
+      "🚗 Орландо-Механик\nВыбери действие или просто напиши вопрос — отвечу как в «Спросить».\n🎤 Голосом можно всё то же: вопрос, поиск, запись работы. Для звука мотора нажми «🩺 Диагност» и пришли запись ответом.",
       menuExpanded()
     );
     return;
@@ -638,37 +718,7 @@ async function handleMessage(m: TgMessage): Promise<void> {
       // Диагностика формата: ответ на сообщение, из которого не удалось достать текст.
       console.warn("bot: reply_to_message без текста:", JSON.stringify(m.reply_to_message).slice(0, 600));
     }
-    const firstLine = replied.split("\n")[0] ?? "";
-    const head = headingOf(firstLine);
-
-    if (head === HEAD_SEARCH) return await runSearch(chatId, text);
-
-    if (head === HEAD_SUMMARIZE) return await runSummarize(chatId, text);
-
-    if (head === HEAD_DIAGNOSE) {
-      // Ответ на результат диагноза: исходный симптом лежит в эхо первой строки «🩺 Диагност · «…»».
-      const echo = firstLine.match(ECHO_RE)?.[1] ?? "";
-      return await runDiagnose(chatId, echo ? `${echo} ${text}` : text);
-    }
-
-    if (head === HEAD_EDIT) {
-      const id = replied.match(/id:\s*([0-9a-f-]{36})/i)?.[1] ?? "";
-      return await runEditPreview(chatId, id, text);
-    }
-
-    if (HEAD_PREVIEWS.has(head)) {
-      await sendMessage(
-        chatId,
-        "Под превью нажми «✓ Сохранить» или «✗ Отмена». Чтобы переписать — отмени и пришли запись заново через меню.",
-        menuCollapsed()
-      );
-      return;
-    }
-
-    if (head === HEAD_LOG) return await runLogPreview(chatId, text);
-
-    // «Спросить», обычное сообщение и ответ на любое другое сообщение бота — вопрос к AI.
-    return await runAsk(chatId, text);
+    return await routeText(chatId, text, replied);
   } catch (e) {
     await reportError(chatId, e);
   }
