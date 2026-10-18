@@ -4,7 +4,7 @@ AI-помощник владельца Chevrolet Orlando: RAG по выгруз�
 
 ## Стек
 
-- Next.js 14 (app router) + Tailwind, один экран `app/page.tsx`
+- Next.js 16 (app router, с 18.10.2026) + Tailwind, один экран `app/page.tsx`
 - Supabase (REST, только service_role на сервере) — треды чата (pgvector) + история машины
 - Mistral `mistral-embed` (1024d) — эмбеддинги для поиска
 - OpenRouter: DeepSeek (ответы/триаж), GPT-4o-mini (парсинг записей), Perplexity Sonar (интернет), Gemini 2.5 Flash (звук)

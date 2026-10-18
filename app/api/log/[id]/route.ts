@@ -38,7 +38,7 @@ const ALLOWED_FIELDS = new Set<keyof AllowedPatch>([
   "notes",
 ]);
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const auth = checkAuth(req);
     if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: 401 });
@@ -54,19 +54,19 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       return NextResponse.json({ error: "no fields to update" }, { status: 400 });
     }
 
-    const updated = await updateServiceRecord(params.id, patch);
+    const updated = await updateServiceRecord((await params).id, patch);
     return NextResponse.json({ ok: true, record: updated });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
 }
 
-export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const auth = checkAuth(req);
     if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: 401 });
 
-    await deleteServiceRecord(params.id);
+    await deleteServiceRecord((await params).id);
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
