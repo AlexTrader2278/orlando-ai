@@ -1,6 +1,6 @@
 import { embed } from "./mistral";
 import { rpcSearchThreads, type SearchResult } from "./supabase-rest";
-import { chat } from "./openrouter";
+import { chat, FALLBACK_MODEL } from "./openrouter";
 import { getServiceRecords, formatHistoryForPrompt, extractMileageFromQuestion } from "./car";
 
 const TOP_K_FOR_LLM = 8;
@@ -113,7 +113,7 @@ export async function askOrlando(question: string): Promise<AskAnswer> {
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userPrompt },
     ],
-    { model: ANSWER_MODEL, temperature: 0.2, maxTokens: 1500 }
+    { model: ANSWER_MODEL, temperature: 0.2, maxTokens: 1500, timeoutMs: 45_000, fallbackModel: FALLBACK_MODEL }
   );
 
   return {

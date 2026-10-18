@@ -1,6 +1,6 @@
 import { embed } from "./mistral";
 import { rpcSearchThreads, type SearchResult } from "./supabase-rest";
-import { chat } from "./openrouter";
+import { chat, FALLBACK_MODEL } from "./openrouter";
 import { CAR_PROFILE } from "./ask";
 import { getServiceRecords, formatHistoryForPrompt, extractMileageFromQuestion } from "./car";
 
@@ -191,7 +191,7 @@ export async function diagnose(symptom: string, audio?: DiagnoseAudio): Promise<
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: promptParts.join("\n\n") },
     ],
-    { model: MODEL, temperature: 0.1, maxTokens: 1200 }
+    { model: MODEL, temperature: 0.1, maxTokens: 1200, timeoutMs: 45_000, fallbackModel: FALLBACK_MODEL }
   );
 
   const triage = validate(JSON.parse(extractJson(content)));

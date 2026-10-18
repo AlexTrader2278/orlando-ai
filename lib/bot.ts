@@ -725,6 +725,15 @@ async function handleMessage(m: TgMessage): Promise<void> {
 }
 
 export async function handleUpdate(u: TgUpdate): Promise<void> {
-  if (u.callback_query) return handleCallback(u.callback_query);
-  if (u.message) return handleMessage(u.message);
+  const chatId = u.message?.chat.id ?? u.callback_query?.message?.chat.id;
+  const started = Date.now();
+  // «Печатает…» в Telegram гаснет через ~5 с — освежаем, пока бот думает, чтобы долгий ответ не выглядел как зависание.
+  const typing = chatId ? setInterval(() => void sendTyping(chatId), 4500) : null;
+  try {
+    if (u.callback_query) return await handleCallback(u.callback_query);
+    if (u.message) return await handleMessage(u.message);
+  } finally {
+    if (typing) clearInterval(typing);
+    console.log(`bot update: ${u.callback_query ? "кнопка" : "сообщение"} обработано за ${((Date.now() - started) / 1000).toFixed(1)} c`);
+  }
 }

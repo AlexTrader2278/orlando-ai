@@ -1,6 +1,6 @@
 import { embed } from "./mistral";
 import { rpcSearchThreads, type SearchResult } from "./supabase-rest";
-import { chat } from "./openrouter";
+import { chat, FALLBACK_MODEL } from "./openrouter";
 
 // Те же модели/пакеты что и в /api/ask, отдельной зависимости не плодим.
 const SUMMARIZE_MODEL = "deepseek/deepseek-chat";
@@ -68,7 +68,7 @@ export async function summarizeFindings(question: string): Promise<SummarizeAnsw
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userPrompt },
     ],
-    { model: SUMMARIZE_MODEL, temperature: 0.3, maxTokens: 900 }
+    { model: SUMMARIZE_MODEL, temperature: 0.3, maxTokens: 900, timeoutMs: 45_000, fallbackModel: FALLBACK_MODEL }
   );
 
   return {

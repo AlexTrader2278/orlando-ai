@@ -3,7 +3,7 @@ import { summarizeFindings } from "@/lib/summarize";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 150;
 
 const MAX_QUERY = 300;
 
