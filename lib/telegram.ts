@@ -90,7 +90,7 @@ export async function setMarkup(chatId: number, messageId: number, markup: Reply
 
 /* ── Меню-гармошка: свёрнуто = одна кнопка, развёрнуто = блок действий ── */
 
-export type MenuAction = "ask" | "diagnose" | "log" | "search" | "summarize" | "car" | "records" | "export";
+export type MenuAction = "ask" | "diagnose" | "log" | "search" | "summarize" | "car" | "plan" | "records" | "export";
 
 const MENU_ITEMS: { action: MenuAction; label: string }[] = [
   { action: "ask", label: "💬 Спросить" },
@@ -99,6 +99,7 @@ const MENU_ITEMS: { action: MenuAction; label: string }[] = [
   { action: "search", label: "🔎 Поиск по чату" },
   { action: "summarize", label: "📝 Суммировать" },
   { action: "car", label: "🛠 Моя машина" },
+  { action: "plan", label: "🔔 План ТО" },
   { action: "records", label: "📋 Записи" },
   { action: "export", label: "⬇️ Выгрузка" },
 ];

@@ -16,7 +16,9 @@
     "search": "tsx --env-file=.env.local scripts/search.ts",
     "seed-car": "tsx --env-file=.env.local scripts/seed-car.ts",
     "seed-summary": "tsx --env-file=.env.local scripts/seed-summary.ts",
-    "seed-itog": "tsx --env-file=.env.local scripts/seed-itog.ts"
+    "seed-itog": "tsx --env-file=.env.local scripts/seed-itog.ts",
+    "maint-check": "tsx --env-file=.env.local scripts/maint-check.ts",
+    "maint-test": "tsx scripts/maint-test.ts"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

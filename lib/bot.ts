@@ -31,6 +31,9 @@ import {
   type ReplyMarkup,
 } from "./telegram";
 import { sendRich, plainOf, esc, llmMd, quote, cell } from "./tgrich";
+import { computePlan, PLAN } from "./maintenance-plan";
+import { mdPlan } from "./maintenance-md";
+import { getLatestOdometer, saveOdometer, snoozeItem } from "./maintenance-store";
 
 type RichBits = { text?: string; rich_message?: { blocks?: unknown[] } };
 type TgUser = { id: number };
@@ -351,6 +354,11 @@ async function routeText(chatId: number, text: string, replied: string): Promise
   const firstLine = replied.split("\n")[0] ?? "";
   const head = headingOf(firstLine);
 
+  if (!MODE_HEADS.has(head)) {
+    const km = parseOdometer(text);
+    if (km != null) return await runOdometer(chatId, km);
+  }
+
   if (head === HEAD_SEARCH) return await runSearch(chatId, text);
 
   if (head === HEAD_SUMMARIZE) return await runSummarize(chatId, text);
@@ -375,7 +383,11 @@ async function routeText(chatId: number, text: string, replied: string): Promise
     return;
   }
 
-  if (head === HEAD_LOG) return await runLogPreview(chatId, text);
+  if (head === HEAD_LOG) {
+    // Ответ на «✓ Делал» из напоминания: в эхо первой строки — название пункта, подставляем его в текст записи.
+    const item = firstLine.match(ECHO_RE)?.[1];
+    return await runLogPreview(chatId, item ? `${item}: ${text}` : text);
+  }
 
   // «Спросить», обычное сообщение и ответ на любое другое сообщение бота — вопрос к AI.
   return await runAsk(chatId, text);
@@ -500,6 +512,65 @@ async function runEditPreview(chatId: number, recordId: string, instruction: str
   await sendRich(chatId, mdPreview("Проверь правку", v.record, mdDiff(oldParsed, v.record)), previewButtons(id));
 }
 
+/* ── План ТО: пробег числом, «✓ Делал», «+30 дн.» ── */
+
+async function planMarkdown(): Promise<string> {
+  const [records, odometer] = await Promise.all([getServiceRecords(500), getLatestOdometer()]);
+  const plan = computePlan(records, today(), odometer);
+  return mdPlan(plan.mileage, plan.items);
+}
+
+const ODOMETER_RE = /^(?:пробег|сейчас|одометр)?\s*:?\s*(\d[\d\s]{3,8}\d)\s*(?:км|km)?\s*$/i;
+const MODE_HEADS = new Set([HEAD_ASK, HEAD_SEARCH, HEAD_SUMMARIZE, HEAD_DIAGNOSE, HEAD_LOG, HEAD_EDIT, ...HEAD_PREVIEWS]);
+
+/** «206500», «пробег 206 500 км» → число; всё остальное (вопросы, даты, суммы с текстом) — null. */
+export function parseOdometer(text: string): number | null {
+  const t = text.trim();
+  const m = t.match(ODOMETER_RE);
+  if (!m) return null;
+  const km = Number(m[1].replace(/\s/g, ""));
+  return Number.isInteger(km) && km >= 1000 && km <= 1_500_000 ? km : null;
+}
+
+async function runOdometer(chatId: number, km: number): Promise<void> {
+  const records = await getServiceRecords(500);
+  const latest = Math.max(0, ...records.map((r) => r.mileage_km ?? 0), (await getLatestOdometer())?.km ?? 0);
+  if (km < latest) {
+    await sendMessage(
+      chatId,
+      `Это меньше, чем уже записано (${fmtKm(latest)}). Проверь число — или поправь старую запись через «📋 Записи».`,
+      menuCollapsed()
+    );
+    return;
+  }
+  await saveOdometer(km, today());
+  await sendMessage(chatId, `📏 Пробег записан: ${fmtKm(km)}. Пересчитал план.`);
+  await sendRich(chatId, await planMarkdown(), menuCollapsed());
+}
+
+const SNOOZE_DAYS = 30;
+
+async function handleMaintenanceCallback(chatId: number, messageId: number, parts: string[]): Promise<void> {
+  const item = PLAN.find((i) => i.id === parts[2]);
+  if (!item || (parts[1] !== "done" && parts[1] !== "snooze")) return;
+
+  if (parts[1] === "done") {
+    // Дальше обычный сценарий «Записать работу»: эхо в первой строке подставит название пункта в текст ответа.
+    await sendMessage(
+      chatId,
+      `✍️ Записать работу · «${item.title}»
+Когда и на каком пробеге это делали? Ответь на это сообщение — сначала покажу, что понял, в базу пишу только после «✓ Сохранить».`,
+      { force_reply: true, input_field_placeholder: "Например: менял в марте, пробег 203000" }
+    );
+    return;
+  }
+
+  const until = new Date(Date.now() + SNOOZE_DAYS * 86_400_000).toISOString().slice(0, 10);
+  await snoozeItem(item.id, until, "overdue");
+  await setMarkup(chatId, messageId, menuCollapsed());
+  await sendMessage(chatId, `⏰ Хорошо, про «${item.title}» не напоминаю до ${ruDate(until)}.`, menuCollapsed());
+}
+
 async function runAction(chatId: number, action: MenuAction): Promise<void> {
   // Подсказки с force_reply — обычным текстом: по их первой строке бот узнаёт режим ответа.
   const forceReply = (text: string, placeholder: string) =>
@@ -535,6 +606,11 @@ async function runAction(chatId: number, action: MenuAction): Promise<void> {
       await sendTyping(chatId);
       await sendRich(chatId, mdCar(await getServiceRecords(50)), menuCollapsed());
       return;
+    case "plan": {
+      await sendTyping(chatId);
+      await sendRich(chatId, await planMarkdown(), menuCollapsed());
+      return;
+    }
     case "records": {
       await sendTyping(chatId);
       const records = await getServiceRecords(50);
@@ -665,6 +741,7 @@ async function handleCallback(cb: TgCallback): Promise<void> {
       return await runAction(chatId, action as MenuAction);
     }
     if (parts[0] === "rec") return await handleRecordCallback(chatId, msg.message_id, parts);
+    if (parts[0] === "mt") return await handleMaintenanceCallback(chatId, msg.message_id, parts);
     if (parts[0] === "srch") {
       const offset = Number(parts[1]);
       const query = plainOf(msg).split("\n")[0]?.match(ECHO_RE)?.[1];
