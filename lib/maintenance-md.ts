@@ -90,7 +90,7 @@ export function mdDigest(mileage: CurrentMileage, items: ItemResult[]): string {
   const lines = items.map((r) => {
     const b = r.basis!;
     const done = `${ruDate(b.date)}${b.mileage_km != null ? ` · ${b.mileage_km.toLocaleString("ru-RU")} км` : ""}${b.loose ? " (вероятно, в записи «масло и фильтры»)" : ""}`;
-    return `${ICON[r.status]} **${esc(r.item.title)}** — ${r.status === "overdue" ? "" : "скоро, "}${esc(leftText(r))} (срок ${esc(dueText(r))}).\nПоследний раз: ${esc(done)}.`;
+    return `${ICON[r.status]} **${esc(r.item.title)}** — ${r.status === "overdue" ? "" : r.urgent ? "меньше месяца, " : "пора планировать, "}${esc(leftText(r))} (срок ${esc(dueText(r))}).\nПоследний раз: ${esc(done)}.`;
   });
   return [
     "## 🔔 Пора подумать о ТО",

@@ -153,11 +153,18 @@ export type ItemResult = {
   dueKm: number | null;
   daysLeft: number | null;
   kmLeft: number | null;
+  /** Меньшее из «дней до срока» и «пробега до срока, пересчитанного в дни по вашему темпу». */
+  effDaysLeft: number | null;
+  /** Осталось меньше месяца — повод для второго, «последнего» предупреждения. */
+  urgent: boolean;
 };
 
 const DAY = 86_400_000;
-const SOON_DAYS = 30;
-const SOON_KM = 1_500;
+/** Первое предупреждение «пора планировать» за ~2 месяца, второе «последний звонок» — за ~месяц. */
+export const SOON_DAYS = 60;
+export const URGENT_DAYS = 30;
+/** Темп для пересчёта км в дни, если оценить его по записям не удалось (~11 тыс. км/год). */
+const DEFAULT_PACE = 30;
 
 function toTime(iso: string): number {
   return new Date(`${iso}T00:00:00Z`).getTime();
@@ -243,7 +250,7 @@ export function computePlan(
       }
     }
     if (!basis) {
-      return { item, status: "no_data", basis: null, dueDate: null, dueKm: null, daysLeft: null, kmLeft: null };
+      return { item, status: "no_data", basis: null, dueDate: null, dueKm: null, daysLeft: null, kmLeft: null, effDaysLeft: null, urgent: false };
     }
 
     const dueDate = item.intervalMonths != null ? addMonths(basis.date, item.intervalMonths) : null;
@@ -252,11 +259,16 @@ export function computePlan(
     const daysLeft = dueDate ? daysBetween(today, dueDate) : null;
     const kmLeft = dueKm != null && mileage.km != null ? dueKm - mileage.km : null;
 
+    const pace = mileage.pacePerDay ?? DEFAULT_PACE;
+    const horizons = [daysLeft, kmLeft != null ? kmLeft / pace : null].filter((n): n is number => n != null);
+    const effDaysLeft = horizons.length ? Math.round(Math.min(...horizons)) : null;
+
     let status: ItemStatus = "ok";
     if ((daysLeft != null && daysLeft < 0) || (kmLeft != null && kmLeft < 0)) status = "overdue";
-    else if ((daysLeft != null && daysLeft <= SOON_DAYS) || (kmLeft != null && kmLeft <= SOON_KM)) status = "soon";
+    else if (effDaysLeft != null && effDaysLeft <= SOON_DAYS) status = "soon";
+    const urgent = status === "soon" && effDaysLeft != null && effDaysLeft <= URGENT_DAYS;
 
-    return { item, status, basis, dueDate, dueKm, daysLeft, kmLeft };
+    return { item, status, basis, dueDate, dueKm, daysLeft, kmLeft, effDaysLeft, urgent };
   });
 
   return { mileage, items };
@@ -275,8 +287,8 @@ const RANK: Record<ItemStatus, number> = { no_data: 0, ok: 0, soon: 1, overdue: 
 export const OVERDUE_REPEAT_DAYS = 30;
 
 /**
- * Пингуем пункт, если он «скоро»/«просрочен» и: ещё не пинговали, ИЛИ стало хуже (скоро → просрочено),
- * ИЛИ просрочен и прошло ≥ 30 дней с прошлого напоминания. Отложенное (snoozed_until ≥ сегодня) молчит.
+ * Пингуем пункт, если он «скоро» (≤ 60 дн.)/«просрочен» и: ещё не пинговали, ИЛИ стало хуже (скоро → просрочено),
+ * ИЛИ «скоро» перешло в «меньше месяца» (второе предупреждение, один раз), ИЛИ просрочен и прошло ≥ 30 дней. Отложенное (snoozed_until ≥ сегодня) молчит.
  * «В порядке» и «нет записей» не пингуем никогда — «нет записей» видно в «План ТО» по запросу.
  */
 export function pickReminders(items: ItemResult[], log: ReminderLogRow[], today: string): ItemResult[] {
@@ -288,6 +300,9 @@ export function pickReminders(items: ItemResult[], log: ReminderLogRow[], today:
     if (row.snoozed_until && row.snoozed_until >= today) return false;
     if (RANK[r.status] > RANK[row.last_status]) return true;
     const sinceNotified = daysBetween(row.notified_at.slice(0, 10), today);
-    return r.status === "overdue" && sinceNotified >= OVERDUE_REPEAT_DAYS;
+    if (r.status === "overdue") return sinceNotified >= OVERDUE_REPEAT_DAYS;
+    // Второе предупреждение за месяц: шлём один раз — если при прошлом напоминании до срока было ещё больше месяца.
+    // (effDaysLeft + прошедшие дни ≈ значение на момент прошлого напоминания; после «последнего звонка» оно ≤ 30 и не повторяется.)
+    return r.urgent && r.effDaysLeft != null && r.effDaysLeft + sinceNotified > URGENT_DAYS;
   });
 }

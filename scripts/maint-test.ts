@@ -91,6 +91,32 @@ const base = [rec("2026-01-01", 200_000, ["Диагностика"]), rec("2026-
   check("«нет данных» и «в порядке» не пингуются никогда", none.length === 0, none.map((r) => r.item.id).join(","));
 }
 
+// 8а. Два предупреждения: за ~2 месяца и за ~месяц, каждое один раз.
+{
+  const oilAt = (date: string) => [...base, rec(date, 200_500, ["Замена моторного масла"])];
+  const oil = (recs: ServiceRecord[], day: string) => get(computePlan(recs, day).items, "oil-engine");
+
+  check("до срока 70 дней → ещё в порядке", oil(oilAt("2026-01-01"), TODAY).status === "ok", String(oil(oilAt("2026-01-01"), TODAY).effDaysLeft));
+  const at50 = oil(oilAt("2025-12-12"), TODAY);
+  check("до срока 50 дней → «пора планировать»", at50.status === "soon" && at50.urgent === false, `${at50.status} ${at50.effDaysLeft} urgent=${at50.urgent}`);
+
+  const row = (notified: string): ReminderLogRow => ({ item_id: "oil-engine", last_status: "soon", notified_at: `${notified}T06:00:00Z`, snoozed_until: null });
+  const picks = (day: string, notified: string | null) =>
+    pickReminders(computePlan(oilAt("2025-12-12"), day).items, notified ? [row(notified)] : [], day).some((r) => r.item.id === "oil-engine");
+
+  check("первое предупреждение (50 дней) → шлём", picks(TODAY, null));
+  check("на следующий день → молчим", !picks("2026-10-24", "2026-10-23"));
+  check("за 17 дней, после первого 33 дня назад → второе предупреждение", picks("2026-11-25", "2026-10-23"));
+  check("после второго (в тот же день) → молчим", !picks("2026-11-25", "2026-11-25"));
+  check("через неделю после второго → молчим (не третье)", !picks("2026-12-02", "2026-11-25"));
+  check("просрочено после «последнего звонка» → шлём", picks("2026-12-14", "2026-11-25"));
+
+  // Срок по пробегу: до 215 500 км ещё далеко по датам, но если пробег подошёл — тоже «скоро».
+  const nearKm = computePlan([...base, rec("2026-03-01", 200_000, ["Замена моторного масла"])], TODAY, { date: TODAY, km: 214_900 });
+  const o = get(nearKm.items, "oil-engine");
+  check("пробег 214 900 при сроке 215 000 → меньше месяца", o.status === "soon" && o.urgent === true, `${o.status} eff=${o.effDaysLeft}`);
+}
+
 // 9. Пробег числом.
 {
   check("«206500»", parseOdometer("206500") === 206_500);
