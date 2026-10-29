@@ -7,7 +7,8 @@ export const FALLBACK_MODEL = "google/gemini-2.5-flash";
 
 export type ContentPart =
   | { type: "text"; text: string }
-  | { type: "input_audio"; input_audio: { data: string; format: string } };
+  | { type: "input_audio"; input_audio: { data: string; format: string } }
+  | { type: "image_url"; image_url: { url: string } };
 
 export type ChatMessage = {
   role: "system" | "user" | "assistant";

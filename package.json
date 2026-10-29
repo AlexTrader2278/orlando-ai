@@ -18,7 +18,8 @@
     "seed-summary": "tsx --env-file=.env.local scripts/seed-summary.ts",
     "seed-itog": "tsx --env-file=.env.local scripts/seed-itog.ts",
     "maint-check": "tsx --env-file=.env.local scripts/maint-check.ts",
-    "maint-test": "tsx scripts/maint-test.ts"
+    "maint-test": "tsx scripts/maint-test.ts",
+    "photo-check": "tsx --env-file=.env.local scripts/photo-check.ts"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

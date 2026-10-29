@@ -15,6 +15,7 @@ import { savePending, takePending, UUID_RE } from "./bot-pending";
 import { embed } from "./mistral";
 import { rpcSearchThreads } from "./supabase-rest";
 import { transcribeVoice } from "./voice";
+import { readDocumentPhoto } from "./photo";
 import {
   sendMessage,
   sendDocument,
@@ -45,6 +46,9 @@ type TgMessage = RichBits & {
   reply_to_message?: RichBits;
   voice?: TgMedia;
   audio?: TgMedia;
+  photo?: (TgMedia & { width?: number; height?: number })[];
+  document?: TgMedia;
+  caption?: string;
 };
 type TgCallback = {
   id: string;
@@ -59,6 +63,7 @@ const MAX_SUMMARY_QUERY = 300;
 const LIST_LIMIT = 8;
 const MAX_VOICE_SECONDS = 60;
 const MAX_VOICE_BYTES = 2_000_000;
+const MAX_IMAGE_BYTES = 7_000_000;
 
 /* Режим диалога без базы: подсказка бота уходит с force_reply, а по ПЕРВОЙ строке сообщения, на которое
    ответил владелец, узнаём, что он хочет. Заголовок = часть строки до «·» без эмодзи и знаков, сравнивается
@@ -386,7 +391,8 @@ async function routeText(chatId: number, text: string, replied: string): Promise
   if (head === HEAD_LOG) {
     // Ответ на «✓ Делал» из напоминания: в эхо первой строки — название пункта, подставляем его в текст записи.
     const item = firstLine.match(ECHO_RE)?.[1];
-    return await runLogPreview(chatId, item ? `${item}: ${text}` : text);
+    await runLogPreview(chatId, item ? `${item}: ${text}` : text);
+    return;
   }
 
   // «Спросить», обычное сообщение и ответ на любое другое сообщение бота — вопрос к AI.
@@ -474,20 +480,69 @@ async function runExport(chatId: number): Promise<void> {
   }
 }
 
-async function runLogPreview(chatId: number, text: string): Promise<void> {
+async function runLogPreview(chatId: number, text: string): Promise<ParsedRecord | null> {
   if (text.length < 5) {
     await sendMessage(chatId, "Слишком коротко — опиши, что сделали, пробег и сумму.", menuCollapsed());
-    return;
+    return null;
   }
   await sendTyping(chatId);
   const parsed = await parseFreeText(text, today());
   const v = validateParsedRecord(parsed, today());
   if (!v.ok) {
     await sendMessage(chatId, `Не распозналось: ${v.error}. Поправь текст и пришли снова.`, menuCollapsed());
-    return;
+    return null;
   }
   const id = await savePending(chatId, "add", { record: v.record });
   await sendRich(chatId, mdPreview("Проверь запись", v.record), previewButtons(id));
+  return v.record;
+}
+
+/* ── Фото документа (заказ-наряд, накладная, чек) → запись в книжку, с превью и «✓ Сохранить» ── */
+
+const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+/** Фото из Telegram приходит набором размеров — берём самый большой; картинку, присланную файлом, тоже читаем. */
+function pickImage(m: TgMessage): { fileId: string; size: number; mime: string } | null {
+  if (m.photo?.length) {
+    const p = m.photo[m.photo.length - 1];
+    return { fileId: p.file_id, size: p.file_size ?? 0, mime: "image/jpeg" };
+  }
+  const d = m.document;
+  if (d?.mime_type && IMAGE_MIMES.has(d.mime_type)) return { fileId: d.file_id, size: d.file_size ?? 0, mime: d.mime_type };
+  return null;
+}
+
+async function runPhoto(chatId: number, m: TgMessage, img: { fileId: string; size: number; mime: string }): Promise<void> {
+  if (img.size > MAX_IMAGE_BYTES) {
+    await sendMessage(chatId, "Фото слишком большое. Пришли его обычным фото (не файлом) или сожми.", menuCollapsed());
+    return;
+  }
+  await sendTyping(chatId);
+  const buf = await downloadFile(img.fileId);
+  if (buf.length > MAX_IMAGE_BYTES) {
+    await sendMessage(chatId, "Фото слишком большое. Пришли его обычным фото (не файлом) или сожми.", menuCollapsed());
+    return;
+  }
+  const text = await readDocumentPhoto({ data: buf.toString("base64"), mime: img.mime });
+  console.log(`bot photo: символов=${text.length}`);
+  if (!text) {
+    await sendMessage(
+      chatId,
+      "📷 Не нашёл на фото читаемого текста. Сфотографируй документ ровно, при хорошем свете, чтобы весь лист был в кадре, — или опиши работу словами.",
+      menuCollapsed()
+    );
+    return;
+  }
+  const caption = cleanText(m.caption ?? "");
+  const record = await runLogPreview(chatId, `${caption ? `${caption}\n\n` : ""}Текст с фото документа:\n${text}`);
+  if (record && record.mileage_km == null) {
+    await sendMessage(
+      chatId,
+      "💡 Пробега на документе нет. Чтобы он попал в запись, пришли фото с подписью, например «пробег 206300». Сверь также номера и суммы с бумагой: текст с фото читает нейросеть."
+    );
+  } else if (record) {
+    await sendMessage(chatId, "💡 Текст с фото читает нейросеть: сверь номера и суммы с бумагой перед «✓ Сохранить».");
+  }
 }
 
 async function runEditPreview(chatId: number, recordId: string, instruction: string): Promise<void> {
@@ -756,7 +811,8 @@ async function handleCallback(cb: TgCallback): Promise<void> {
 
 async function handleMessage(m: TgMessage): Promise<void> {
   const hasAudio = Boolean(m.voice ?? m.audio);
-  if (m.chat.type !== "private" || (!m.text && !hasAudio)) return;
+  const image = pickImage(m);
+  if (m.chat.type !== "private" || (!m.text && !hasAudio && !image)) return;
   const chatId = m.chat.id;
   const text = (m.text ?? "").trim();
 
@@ -774,10 +830,19 @@ async function handleMessage(m: TgMessage): Promise<void> {
   if (text.startsWith("/start") || text.startsWith("/menu")) {
     await sendMessage(
       chatId,
-      "🚗 Орландо-Механик\nВыбери действие или просто напиши вопрос — отвечу как в «Спросить».\n🎤 Голосом можно всё то же: вопрос, поиск, запись работы. Для звука мотора нажми «🩺 Диагност» и пришли запись ответом.",
+      "🚗 Орландо-Механик\nВыбери действие или просто напиши вопрос — отвечу как в «Спросить».\n🎤 Голосом можно всё то же: вопрос, поиск, запись работы.\n📷 Фото заказ-наряда, накладной или чека — прочитаю и подготовлю запись, останется нажать «Сохранить». Для звука мотора нажми «🩺 Диагност» и пришли запись ответом.",
       menuExpanded()
     );
     return;
+  }
+
+  if (image) {
+    try {
+      return await runPhoto(chatId, m, image);
+    } catch (e) {
+      await reportError(chatId, e);
+      return;
+    }
   }
 
   if (hasAudio) {
